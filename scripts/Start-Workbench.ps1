@@ -1,6 +1,8 @@
-param(
+﻿param(
     [string]$LanHost = '192.0.2.6',
-    [string]$PythonPath = 'C:\Users\user\AppData\Local\Programs\Python\Python312\python.exe'
+    [string]$PythonPath = 'C:\Users\user\AppData\Local\Programs\Python\Python312\python.exe',
+    [switch]$Direct,
+    [string]$ProjectPath = (Split-Path $PSScriptRoot -Parent)
 )
 $ErrorActionPreference = 'Stop'
 function Test-GatewayHealth {
@@ -13,7 +15,21 @@ function Test-GatewayHealth {
         return ($localHealth.service -eq 'script-workbench' -and $lanHealth.service -eq 'script-workbench' -and $localCapabilities.can_open_folder -eq $true -and $lanCapabilities.can_open_folder -eq $false)
     } catch { return $false }
 }
-$projectPath = Split-Path $PSScriptRoot -Parent
+$autostartTask = Get-ScheduledTask -TaskName 'ScriptWorkbench' -ErrorAction SilentlyContinue
+if (-not $Direct -and $autostartTask) {
+    Enable-ScheduledTask -TaskName 'ScriptWorkbench' | Out-Null
+    if ($autostartTask.State -ne 'Running') { Start-ScheduledTask -TaskName 'ScriptWorkbench' }
+    for ($attempt = 0; $attempt -lt 60; $attempt++) {
+        if (Test-GatewayHealth $LanHost) {
+            Write-Output "本机入口：http://localhost:8788/"
+            Write-Output "局域网入口：http://${LanHost}:8787/"
+            exit 0
+        }
+        Start-Sleep -Seconds 1
+    }
+    throw 'Autostart task has not become healthy; inspect %ProgramData%\ScriptWorkbench\autostart.log'
+}
+$projectPath = $ProjectPath
 $executor = "$env:USERPROFILE\.codex\bin\Invoke-WslProject.ps1"
 & $executor -WorkingDirectory $projectPath -FilePath systemctl -ArgumentList @('--user', 'start', 'script-workbench.service')
 if ($LASTEXITCODE -ne 0) { throw 'WSL service start failed' }
@@ -40,9 +56,9 @@ if (Test-Path -LiteralPath $pidPath) {
         Stop-Process -Id $gatewayPid
     }
 }
-$gatewayPath = Join-Path $PSScriptRoot 'windows_gateway.py'
+$gatewayPath = Join-Path $projectPath 'scripts\windows_gateway.py'
 $keyPath = Join-Path $projectPath 'data\host.key'
-$arguments = @('"' + $gatewayPath + '"', '--lan-host', $LanHost, '--host-key-file', '"' + $keyPath + '"')
+$arguments = @(('"' + $gatewayPath + '"'), '--lan-host', $LanHost, '--host-key-file', ('"' + $keyPath + '"'))
 $process = Start-Process -FilePath $PythonPath -ArgumentList $arguments -WindowStyle Hidden -PassThru -RedirectStandardOutput (Join-Path $projectPath 'data\gateway.stdout.log') -RedirectStandardError (Join-Path $projectPath 'data\gateway.stderr.log')
 Set-Content -LiteralPath $pidPath -Value $process.Id -NoNewline
 Start-Sleep -Milliseconds 500

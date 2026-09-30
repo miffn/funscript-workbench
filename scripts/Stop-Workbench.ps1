@@ -1,5 +1,17 @@
+﻿param([string]$ProjectPath = (Split-Path $PSScriptRoot -Parent))
 $ErrorActionPreference = 'Stop'
-$projectPath = Split-Path $PSScriptRoot -Parent
+$autostartTask = Get-ScheduledTask -TaskName 'ScriptWorkbench' -ErrorAction SilentlyContinue
+if ($autostartTask -and $autostartTask.State -eq 'Running') { Stop-ScheduledTask -TaskName 'ScriptWorkbench' }
+$keeperPath = Join-Path $env:ProgramData 'ScriptWorkbench\keeper.pid'
+if (Test-Path -LiteralPath $keeperPath) {
+    $keeperPid = [int](Get-Content -LiteralPath $keeperPath -Raw)
+    $keeperProcess = Get-CimInstance Win32_Process -Filter "ProcessId=$keeperPid" -ErrorAction SilentlyContinue
+    if ($keeperProcess -and $keeperProcess.Name -eq 'wsl.exe' -and $keeperProcess.CommandLine -match '/usr/bin/sleep infinity') {
+        & "$env:WINDIR\System32\taskkill.exe" /PID $keeperPid /T /F | Out-Null
+    }
+    Remove-Item -LiteralPath $keeperPath -ErrorAction SilentlyContinue
+}
+$projectPath = $ProjectPath
 $pidPath = Join-Path $projectPath 'data\gateway.pid'
 if (Test-Path -LiteralPath $pidPath) {
     $gatewayPid = [int](Get-Content -LiteralPath $pidPath -Raw)

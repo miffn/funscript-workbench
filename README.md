@@ -89,38 +89,27 @@ curl --fail http://127.0.0.1:8789/api/health
 
 Windows 网关的目录打开白名单目前固定在 `scripts/windows_gateway.py` 的 `FOLDER_ROOTS`；更换素材目录时须与后端路径映射一并调整。改变数据目录或密钥位置时，也要给 Windows 网关传入同一密钥文件。
 
-## 5. 启动 Windows 网关
+## 5. 安装 Windows 自启动
 
-先确认 Windows 能访问 `http://127.0.0.1:8789/api/health`。以下命令在 Windows PowerShell 7 中运行，把 `-LanHost` 换成本机实际局域网 IPv4，把 `-PythonPath` 换成实际 Python 路径。
+自启动通过当前用户的 Windows 计划任务 `ScriptWorkbench` 托管，登录 Windows 后延迟 15 秒启动。启动器保存在 `%ProgramData%\ScriptWorkbench`，启动 WSL 后端、保持 WSL 运行并检查两个网页入口；后端或网关退出后自动重试。关闭 Codex、浏览器或启动命令窗口不影响计划任务。无需保存 Windows 密码，也不要求打开 Codex。
 
-现有启停脚本依赖当前 Windows 主机安装的 `C:\Users\<用户名>\.codex\bin\Invoke-WslProject.ps1`，执行器须配置为 Ubuntu 24.04 及当前项目根目录。
+安装前先确认 Windows 可读取 WSL 项目、Windows Python 的实际路径，以及本机局域网 IPv4。以下命令在 Windows PowerShell 中运行，将示例地址和 Python 路径替换为实际值。安装器依赖本机已有的 `C:\Users\<用户名>\.codex\bin\Invoke-WslProject.ps1` 及其 WSL 配置，该执行器作为普通脚本独立工作。
+
+先将安装器复制到 Windows 本地，避免 UNC 来源触发脚本签名限制：
 
 ```powershell
 $projectPath = '\\wsl.localhost\Ubuntu-24.04\home\user\projects\script-workbench'
-& "$projectPath\scripts\Start-Workbench.ps1" `
+$runtimePath = Join-Path $env:ProgramData 'ScriptWorkbench'
+New-Item -ItemType Directory -Path $runtimePath -Force | Out-Null
+Copy-Item -LiteralPath "$projectPath\scripts\Install-Autostart.ps1" -Destination "$runtimePath\Install-Autostart.ps1" -Force
+& "$runtimePath\Install-Autostart.ps1" -ProjectPath $projectPath `
   -LanHost '192.168.1.100' `
   -PythonPath 'C:\Path\To\Python312\python.exe'
 ```
 
-没有该执行器的主机，可以在 WSL 中通过 `systemctl --user start script-workbench.service` 启动后端，再在 Windows 直接启动网关：
+安装器立即启动任务，重复安装会刷新启动器和配置。运行目录只允许当前安装用户、管理员和系统写入。任务使用普通用户权限，无最长运行时间限制，避免多份同时运行；临时网络或 WSL 启动失败会重试。WSL 服务安装器启用用户 linger，使用户服务不依赖终端会话。
 
-```powershell
-$projectPath = '\\wsl.localhost\Ubuntu-24.04\home\user\projects\script-workbench'
-$pythonPath = 'C:\Path\To\Python312\python.exe'
-$lanHost = '192.168.1.100'
-$gatewayArgs = @(
-  ('"' + "$projectPath\scripts\windows_gateway.py" + '"'),
-  '--lan-host', $lanHost,
-  '--host-key-file', ('"' + "$projectPath\data\host.key" + '"')
-)
-$gatewayProcess = Start-Process -FilePath $pythonPath -ArgumentList $gatewayArgs `
-  -WindowStyle Hidden -PassThru `
-  -RedirectStandardOutput "$projectPath\data\gateway.stdout.log" `
-  -RedirectStandardError "$projectPath\data\gateway.stderr.log"
-$gatewayProcess.Id | Set-Content -LiteralPath "$projectPath\data\gateway.pid"
-```
-
-直接启动前确认没有已有网关进程占用 8787/8788；现有 `Start-Workbench.ps1` 会自动检查并复用健康进程。
+这里的自动启动发生在该用户登录 Windows 后。未登录 Windows 时启动不在普通用户任务的覆盖范围内。
 
 管理员 PowerShell 中允许私有局域网访问 8787（已有规则时跳过）：
 
@@ -141,17 +130,24 @@ if (-not (Get-NetFirewallRule -Name 'ScriptWorkbench-LAN' -ErrorAction SilentlyC
 
 在设置页保存扫描目录，点击“立即扫描”初始化库存。修改一条库存的标签或发布状态，刷新页面并重启服务后确认保留。新部署从本地目录与自己的数据库开始，扫描不会自动发生。
 
-电脑重启后打开 WSL 并重新启动 Windows 网关；服务安装脚本启用了 WSL 用户服务，Windows 网关未安装开机自启任务。局域网 IP 改变时使用新地址重新启动网关。
+电脑重启并登录安装任务的 Windows 用户后自动启动。局域网 IP 或 Python 路径改变时重新运行安装器更新配置。
 
 ## 7. 停止、更新与日志
 
-已安装执行器的 Windows 主机：
+启动已安装的任务：
 
 ```powershell
-& '\\wsl.localhost\Ubuntu-24.04\home\user\projects\script-workbench\scripts\Stop-Workbench.ps1'
+Start-ScheduledTask -TaskName 'ScriptWorkbench'
 ```
 
-未安装执行器时，在 Windows 按已保存 PID 停止网关，并先核实进程命令行包含当前项目的 `windows_gateway.py`；在 WSL 执行 `systemctl --user stop script-workbench.service`。
+停止当前任务、网关与后端：
+
+```powershell
+$projectPath = '\\wsl.localhost\Ubuntu-24.04\home\user\projects\script-workbench'
+& "$env:ProgramData\ScriptWorkbench\Stop-Workbench.ps1" -ProjectPath $projectPath
+```
+
+停止脚本先停止守护任务，避免网关被再次拉起；下次登录仍会自启动。如需取消以后自动启动，在停止后执行 `Disable-ScheduledTask -TaskName 'ScriptWorkbench'`；恢复时执行 `Enable-ScheduledTask -TaskName 'ScriptWorkbench'` 后再启动任务。
 
 更新前先停止网关及服务并备份数据，然后在 WSL 项目目录执行：
 
@@ -165,7 +161,7 @@ cmake --build preview_generator/build -j4
 systemctl --user start script-workbench.service
 ```
 
-最后重新启动 Windows 网关。保留 `data/`，更新代码不会重建或清空数据库。
+更新启动脚本后重新运行安装器，将新版本复制到 Windows 运行目录，再启动计划任务。保留 `data/`，更新代码不会重建或清空数据库。
 
 后端日志：
 
@@ -173,7 +169,7 @@ systemctl --user start script-workbench.service
 journalctl --user -u script-workbench.service -n 100 --no-pager
 ```
 
-网关日志：`data/gateway.stdout.log`、`data/gateway.stderr.log`。若网关报告 WSL 服务不可用，先检查后端健康接口；若局域网不可达，检查 Windows IPv4、网络配置文件和 8787 防火墙规则。
+自启动日志：`%ProgramData%\ScriptWorkbench\autostart.log`，WSL 保活错误：同目录 `keeper.stderr.log`；任务状态：`Get-ScheduledTask -TaskName ScriptWorkbench`。网关日志：`data/gateway.stdout.log`、`data/gateway.stderr.log`。若网关报告 WSL 服务不可用，先检查后端健康接口；若局域网不可达，检查 Windows IPv4、网络配置文件和 8787 防火墙规则。
 
 ## 8. 备份与恢复
 

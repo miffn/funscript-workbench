@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 project_dir="$(cd "$(dirname "$0")/.." && pwd)"
+if [[ "$(loginctl show-user "$(id -un)" -p Linger --value)" != "yes" ]]; then
+    sudo loginctl enable-linger "$(id -un)"
+fi
 mkdir -p "$HOME/.config/systemd/user"
 cat > "$HOME/.config/systemd/user/script-workbench.service" <<EOF
 [Unit]
