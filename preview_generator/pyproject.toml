@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ofs-preview-generator"
+version = "1.0.0"
+description = "Standalone offscreen six-axis Funscript preview and GIF generator"
+requires-python = ">=3.10"
+license = {file = "LICENSE"}
+dependencies = []
+
+[project.scripts]
+ofs-preview-generator = "preview_generator.__main__:main"
+
+[tool.setuptools]
+packages = ["preview_generator"]
+package-dir = {preview_generator = "."}
+
+[tool.setuptools.package-data]
+preview_generator = ["LICENSE", "README.md", "CMakeLists.txt", "models/*.glb", "build/ofs-preview-renderer", "renderer/*.cpp", "renderer/*.h", "vendor/PROVENANCE.md", "vendor/OFS-SOURCE.json", "vendor/ofs/*", "vendor/glad/*.c", "vendor/glad/include/glad/*.h", "vendor/glad/include/KHR/*.h", "vendor/imgui/*.cpp", "vendor/imgui/*.h", "vendor/imgui/LICENSE.txt", "vendor/imgui/backends/*.cpp", "vendor/imgui/backends/*.h"]
+

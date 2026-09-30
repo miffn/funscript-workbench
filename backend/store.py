@@ -1,0 +1,121 @@
+from __future__ import annotations
+
+from contextlib import contextmanager
+from datetime import datetime, timezone
+import json
+from pathlib import Path
+import sqlite3
+
+
+def now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS works (
+ id INTEGER PRIMARY KEY, script_id TEXT NOT NULL UNIQUE, title TEXT NOT NULL,
+ status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','published')),
+ notes TEXT NOT NULL DEFAULT '', metadata TEXT NOT NULL DEFAULT '{}', manual_fields TEXT NOT NULL DEFAULT '[]',
+ created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS directories (
+ id INTEGER PRIMARY KEY, work_id INTEGER NOT NULL REFERENCES works(id),
+ path TEXT NOT NULL, windows_path TEXT NOT NULL, root_path TEXT NOT NULL,
+ name TEXT NOT NULL, available INTEGER NOT NULL DEFAULT 1, last_seen TEXT,
+ UNIQUE(work_id,path)
+);
+CREATE TABLE IF NOT EXISTS assets (
+ id INTEGER PRIMARY KEY, directory_id INTEGER NOT NULL REFERENCES directories(id),
+ name TEXT NOT NULL, relative_path TEXT NOT NULL, kind TEXT NOT NULL,
+ axis TEXT, size INTEGER NOT NULL, mtime_ns INTEGER NOT NULL,
+ UNIQUE(directory_id,relative_path)
+);
+CREATE TABLE IF NOT EXISTS covers (
+ work_id INTEGER PRIMARY KEY REFERENCES works(id), fingerprint TEXT NOT NULL,
+ path TEXT, error TEXT, source_path TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS issues (
+ id INTEGER PRIMARY KEY, type TEXT NOT NULL, message TEXT NOT NULL,
+ script_id TEXT, work_id INTEGER REFERENCES works(id), paths TEXT NOT NULL DEFAULT '[]'
+);
+CREATE TABLE IF NOT EXISTS jobs (
+ id INTEGER PRIMARY KEY, type TEXT NOT NULL DEFAULT 'scan', status TEXT NOT NULL,
+ trigger TEXT NOT NULL, created_at TEXT NOT NULL, started_at TEXT, finished_at TEXT,
+ progress INTEGER NOT NULL DEFAULT 0, message TEXT NOT NULL DEFAULT '',
+ result TEXT, error TEXT, inputs TEXT NOT NULL DEFAULT '{}'
+);
+CREATE TABLE IF NOT EXISTS history (
+ script_id TEXT PRIMARY KEY, metadata TEXT NOT NULL, status TEXT NOT NULL,
+ applied INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS tags (
+ id INTEGER PRIMARY KEY,
+ category TEXT NOT NULL CHECK(category IN ('author','video_type','release_type','tier','custom')),
+ name TEXT NOT NULL, name_key TEXT NOT NULL,
+ support_url TEXT,
+ support_status TEXT NOT NULL DEFAULT 'unknown' CHECK(support_status IN ('unknown','none','url')),
+ support_candidates TEXT NOT NULL DEFAULT '[]',
+ support_manual INTEGER NOT NULL DEFAULT 0,
+ revision INTEGER NOT NULL DEFAULT 1,
+ provenance TEXT NOT NULL DEFAULT '[]',
+ UNIQUE(category,name_key),
+ CHECK((support_status='url' AND support_url IS NOT NULL) OR (support_status IN ('unknown','none') AND support_url IS NULL))
+);
+CREATE TABLE IF NOT EXISTS work_tags (
+ work_id INTEGER NOT NULL REFERENCES works(id),
+ tag_id INTEGER NOT NULL REFERENCES tags(id),
+ source TEXT NOT NULL DEFAULT 'manual',
+ provenance TEXT NOT NULL DEFAULT '[]',
+ PRIMARY KEY(work_id,tag_id)
+);
+CREATE TABLE IF NOT EXISTS work_tag_state (
+ work_id INTEGER PRIMARY KEY REFERENCES works(id),
+ revision INTEGER NOT NULL DEFAULT 0,
+ manual_edited INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_assets_directory ON assets(directory_id);
+CREATE INDEX IF NOT EXISTS idx_directories_work ON directories(work_id);
+CREATE INDEX IF NOT EXISTS idx_issues_work ON issues(work_id);
+CREATE INDEX IF NOT EXISTS idx_work_tags_tag ON work_tags(tag_id);
+"""
+
+
+class Store:
+    def __init__(self, data_dir: Path):
+        data_dir.mkdir(parents=True, exist_ok=True)
+        self.path = data_dir / "workbench.sqlite3"
+        with self.connection() as db:
+            db.executescript(SCHEMA)
+            if "inputs" not in {row[1] for row in db.execute("PRAGMA table_info(jobs)")}:
+                db.execute("ALTER TABLE jobs ADD COLUMN inputs TEXT NOT NULL DEFAULT '{}'")
+
+    @contextmanager
+    def connection(self):
+        db = sqlite3.connect(self.path, timeout=20)
+        db.row_factory = sqlite3.Row
+        db.execute("PRAGMA journal_mode=WAL")
+        db.execute("PRAGMA foreign_keys=ON")
+        try:
+            yield db
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+    def job(self, job_id: int) -> dict | None:
+        with self.connection() as db:
+            row = db.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
+        if row is None:
+            return None
+        result = dict(row)
+        if result["result"]:
+            result["result"] = json.loads(result["result"])
+        result["inputs"] = json.loads(result["inputs"])
+        return result
+
+    def issue(self, db, kind: str, message: str, script_id=None, work_id=None, paths=()):
+        db.execute("INSERT INTO issues(type,message,script_id,work_id,paths) VALUES(?,?,?,?,?)",
+                   (kind, message, script_id, work_id, json.dumps(list(paths), ensure_ascii=False)))

@@ -1,0 +1,123 @@
+// @vitest-environment jsdom
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Mock } from 'vitest';
+import type { Notice } from './App';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { Cover, WorkDetail } from './components';
+import { historyEntries, safeLink } from './api';
+import type { Work } from './api';
+
+const fixture: Work = {
+  id: 7, script_id: 'S025_001', title: '已有标题', status: 'pending', notes: '已有备注', video_count: 1,
+  script_count: 2, cover_url: '/api/covers/7', issues: [], updated_at: '2026-09-30T04:00:00Z',
+  directories: [{ id: 12, path: '/mnt/d/library/S025_001', windows_path: 'D:\\library\\S025_001', available: true }],
+  assets: [{ id: 9, name: 'main.mp4', relative_path: 'main.mp4', kind: 'video', size: 1024, directory_id: 12 }],
+};
+const response = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
+let fetchMock: ReturnType<typeof vi.fn>;
+let saved: Mock<() => void>;
+let notify: Mock<(notice: Notice) => void>;
+let onClose: Mock<() => void>;
+const local = { can_open_folder: true, reason: '' };
+const remote = { can_open_folder: false, reason: '不支持打开，仅素材所在主机可用' };
+function detail(capabilities = local) { return render(<WorkDetail id={7} capabilities={capabilities} onClose={onClose} onSaved={saved} notify={notify} />); }
+
+beforeEach(() => {
+  fetchMock = vi.fn().mockImplementation((url: string) => Promise.resolve(response(url.endsWith('/preview') ? { job: null, files: [], output_dir: '/output/S025_001', windows_path: 'D:\\previews\\S025_001' } : fixture)));
+  vi.stubGlobal('fetch', fetchMock);
+  saved = vi.fn(); notify = vi.fn(); onClose = vi.fn();
+  Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value: function(this: HTMLDialogElement) { this.open = true; } });
+});
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+
+describe('persistent work editing', () => {
+  it('keeps unsaved notes when a status change succeeds', async () => {
+    detail();
+    const notes = await screen.findByLabelText('备注');
+    fireEvent.change(notes, { target: { value: '正在输入的备注' } });
+    fetchMock.mockResolvedValueOnce(response({ ...fixture, status: 'published' }));
+    fireEvent.click(screen.getByRole('button', { name: '标记已发布' }));
+    await screen.findByRole('button', { name: '改为待发布' });
+    expect((notes as HTMLTextAreaElement).value).toBe('正在输入的备注');
+    expect(saved).toHaveBeenCalledOnce();
+    expect(JSON.parse(fetchMock.mock.calls.at(-1)![1].body)).toEqual({ status: 'published' });
+    expect((screen.getByRole('button', { name: '保存信息' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('preserves failed edits and only reports success after the retry writes to the server', async () => {
+    detail();
+    const title = await screen.findByLabelText('标题');
+    fireEvent.change(title, { target: { value: '新的标题' } });
+    fetchMock.mockResolvedValueOnce(response({ detail: '数据库暂时不可用' }, 503));
+    fireEvent.click(screen.getByRole('button', { name: '保存信息' }));
+    await screen.findByText('修改未保存：数据库暂时不可用');
+    expect((title as HTMLInputElement).value).toBe('新的标题');
+    expect(saved).not.toHaveBeenCalled();
+    expect(notify).not.toHaveBeenCalled();
+    fetchMock.mockResolvedValueOnce(response({ ...fixture, title: '新的标题' }));
+    fireEvent.click(screen.getByRole('button', { name: '保存信息' }));
+    await waitFor(() => expect(saved).toHaveBeenCalledOnce());
+    expect((screen.getByRole('button', { name: '保存信息' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('uses an accessible in-page discard confirmation and keeps edits when cancelled', async () => {
+    detail();
+    const notes = await screen.findByLabelText('备注');
+    fireEvent.change(notes, { target: { value: '尚未保存' } });
+    fireEvent.click(screen.getByRole('button', { name: '关闭作品详情' }));
+    expect(onClose).not.toHaveBeenCalled();
+    const continueButton = screen.getByRole('button', { name: '继续编辑' });
+    expect(document.activeElement).toBe(continueButton);
+    fireEvent.click(continueButton);
+    expect(screen.queryByText('有尚未保存的修改')).toBeNull();
+    expect((notes as HTMLTextAreaElement).value).toBe('尚未保存');
+    // Escape has the same guard as the close button.
+    fireEvent(screen.getByRole('dialog'), new Event('cancel', { cancelable: true }));
+    fireEvent.click(screen.getByRole('button', { name: '放弃更改并关闭' }));
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls.filter(([url]) => !url.endsWith('/preview'))).toHaveLength(1);
+  });
+});
+
+describe('host folder capability', () => {
+  it('never submits an open-folder request from a remote client', async () => {
+    detail(remote);
+    await screen.findByLabelText('备注');
+    const button = screen.getByRole('button', { name: '打开文件夹' });
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText(remote.reason)).toBeTruthy();
+    fireEvent.click(button);
+    expect(fetchMock.mock.calls.filter(([url]) => !url.endsWith('/preview'))).toHaveLength(1);
+  });
+
+  it('requires an explicit directory choice for conflicting paths and sends only the selected ID', async () => {
+    const duplicate = { ...fixture, directories: [...fixture.directories, { ...fixture.directories[0], id: 18, windows_path: 'D:\\workspace\\S025_001' }] };
+    fetchMock.mockResolvedValueOnce(response(duplicate));
+    detail();
+    await screen.findByLabelText('备注');
+    const button = screen.getByRole('button', { name: '打开文件夹' });
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getAllByRole('radio')[1]);
+    expect((button as HTMLButtonElement).disabled).toBe(false);
+    fetchMock.mockResolvedValueOnce(response({ message: '已发送打开请求' }));
+    fireEvent.click(button);
+    await waitFor(() => expect(notify).toHaveBeenCalledWith({ kind: 'success', message: '已发送打开请求' }));
+    const [, init] = fetchMock.mock.calls.at(-1)!;
+    expect(JSON.parse(init.body)).toEqual({ directory_id: 18 });
+  });
+});
+
+describe('cover and historical data', () => {
+  it('keeps a cover placeholder if an image fails to load', () => {
+    render(<Cover work={fixture} />);
+    fireEvent.error(screen.getByRole('img'));
+    expect(screen.getByText('封面暂不可用')).toBeTruthy();
+    expect(screen.queryByRole('img')).toBeNull();
+  });
+  it('keeps sub-ID historical source links without showing stale production status or duplicating fields', () => {
+    expect(historyEntries({ 'ES Link': ' https://example.com/S025_001 ', 'ES Post URL': '', es_url: 'https://example.com/S025_001', 'Stauts': 'Ready', source_rows: { old: {} }, 'Axis Type': 'Multi-axis' })).toEqual([['轴类型', 'Multi-axis'], ['EroScripts', 'https://example.com/S025_001']]);
+    expect(safeLink('javascript:alert(1)')).toBeNull();
+    expect(safeLink('file:///D:/library')).toBeNull();
+    expect(safeLink('https://example.com/S025_001')).toBe('https://example.com/S025_001');
+  });
+});
