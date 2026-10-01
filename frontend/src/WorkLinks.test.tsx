@@ -28,6 +28,37 @@ async function loadedInput(label: string) {
   return screen.getByLabelText(label);
 }
 describe('inventory link editing', () => {
+  it('copies the saved URL, preserves the unsaved draft and confirms success without saving', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('navigator', { clipboard: { writeText } });
+    const callbacks = editor(); const input = await loadedInput('Patreon 文章链接');
+    fireEvent.change(input, { target: { value: 'https://example.com/unsaved' } });
+    fireEvent.click(screen.getByRole('button', { name: '复制已保存的Patreon 文章链接' }));
+    await screen.findByText('已复制');
+    expect(writeText).toHaveBeenCalledWith(current.links.patreon);
+    expect((input as HTMLInputElement).value).toBe('https://example.com/unsaved');
+    expect(callbacks.onSaved).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: '复制已保存的视频链接' })).toBeNull();
+  });
+  it.each([true, false])('uses the modal-safe HTTP fallback and reports its actual result (%s)', async copied => {
+    vi.stubGlobal('navigator', { clipboard: { writeText: vi.fn().mockRejectedValue(new Error('denied')) } });
+    const copy = vi.fn((command: string) => {
+      expect(command).toBe('copy');
+      expect((document.activeElement as HTMLTextAreaElement).value).toBe(current.links.patreon);
+      expect(document.activeElement?.closest('dialog')).toBeTruthy();
+      return copied;
+    });
+    Object.defineProperty(document, 'execCommand', { configurable: true, value: copy });
+    try {
+      editor(); await loadedInput('Patreon 文章链接');
+      const button = screen.getByRole('button', { name: '复制已保存的Patreon 文章链接' });
+      button.focus(); fireEvent.click(button);
+      await screen.findByText(copied ? '已复制' : '复制失败，请手动复制输入框中的链接。');
+      expect(copy).toHaveBeenCalledOnce();
+      expect(document.querySelector('textarea')).toBeNull();
+      expect(document.activeElement).toBe(button);
+    } finally { Reflect.deleteProperty(document, 'execCommand'); }
+  });
   it('shows four labeled actions and distinguishes filled from missing links', () => {
     const edit = vi.fn(); render(<WorkLinkButtons work={work} onEdit={edit} />);
     expect(screen.getAllByRole('button')).toHaveLength(4);

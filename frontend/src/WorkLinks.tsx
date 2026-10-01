@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
-import { Check, CircleDollarSign, ExternalLink, FileDown, LoaderCircle, MessagesSquare, Video, X } from 'lucide-react';
+import { Check, CircleDollarSign, Copy, ExternalLink, FileDown, LoaderCircle, MessagesSquare, Video, X } from 'lucide-react';
 import { ApiError, errorMessage, request, safeLink } from './api';
 import type { Work, WorkLinkKind, WorkLinks, WorkLinkValues } from './api';
 
@@ -31,6 +31,7 @@ export function WorkLinkEditor({ work, initialKind, onClose, onSaved }: {
   const keepEditing = useRef<HTMLButtonElement>(null);
   const alive = useRef(true);
   const lock = useRef(false);
+  const copyLock = useRef(false);
   const [current, setCurrent] = useState<WorkLinks | null>(null);
   const [draft, setDraft] = useState<WorkLinkValues>(emptyLinks);
   const [loading, setLoading] = useState(true);
@@ -39,6 +40,7 @@ export function WorkLinkEditor({ work, initialKind, onClose, onSaved }: {
   const [conflict, setConflict] = useState(false);
   const [confirmClose, setConfirmClose] = useState(false);
   const [retry, setRetry] = useState(0);
+  const [copyFeedback, setCopyFeedback] = useState<{ kind: WorkLinkKind; status: 'copying' | 'copied' | 'failed' } | null>(null);
   const changed = linkTypes.filter(({ kind }) => draft[kind].trim() !== current?.links[kind]);
   const dirty = !!current && changed.length > 0;
   const close = () => { if (saving) return; if (dirty) setConfirmClose(true); else onClose(); };
@@ -50,13 +52,37 @@ export function WorkLinkEditor({ work, initialKind, onClose, onSaved }: {
   useEffect(() => {
     const controller = new AbortController(); setLoading(true);
     request<WorkLinks>(`/api/works/${work.id}/links`, { signal: controller.signal }).then(value => {
-      if (!controller.signal.aborted) { setCurrent(value); setDraft(value.links); setError(''); setConflict(false); }
+      if (!controller.signal.aborted) { setCurrent(value); setDraft(value.links); setError(''); setConflict(false); setCopyFeedback(null); }
     }).catch(error => { if (!controller.signal.aborted) setError(`无法读取链接：${errorMessage(error)}`); })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
   }, [work.id, retry]);
   useEffect(() => { if (!loading && current) initialInput.current?.focus(); }, [loading, current]);
   useEffect(() => { if (confirmClose) keepEditing.current?.focus(); }, [confirmClose]);
+  const copySavedLink = async (kind: WorkLinkKind) => {
+    const value = current?.links[kind];
+    if (!value || copyLock.current) return;
+    copyLock.current = true; setCopyFeedback({ kind, status: 'copying' });
+    try {
+      let copied = false;
+      if (navigator.clipboard?.writeText) {
+        try { await navigator.clipboard.writeText(value); copied = true; } catch { /* Use the HTTP-compatible fallback below. */ }
+      }
+      if (!copied) {
+        if (!alive.current || !dialog.current) return;
+        const previous = document.activeElement as HTMLElement | null;
+        const text = document.createElement('textarea');
+        text.value = value; text.readOnly = true; text.style.cssText = 'position:fixed;left:0;top:0;opacity:0;pointer-events:none';
+        // A modal makes elements outside it inert, so select inside this dialog.
+        dialog.current.appendChild(text);
+        try { text.focus({ preventScroll: true }); text.select(); copied = document.execCommand('copy'); }
+        finally { text.remove(); previous?.focus({ preventScroll: true }); }
+      }
+      if (!copied) throw new Error('Copy was denied');
+      if (alive.current) setCopyFeedback({ kind, status: 'copied' });
+    } catch { if (alive.current) setCopyFeedback({ kind, status: 'failed' }); }
+    finally { copyLock.current = false; }
+  };
   const save = async (event: FormEvent) => {
     event.preventDefault();
     if (!current || !dirty || lock.current || conflict) return;
@@ -87,13 +113,13 @@ export function WorkLinkEditor({ work, initialKind, onClose, onSaved }: {
     {confirmClose && <div className="discard-confirm" role="alert"><strong>链接修改尚未保存</strong><p>关闭会放弃本次输入。</p><div><button ref={keepEditing} className="button small" onClick={() => { setConfirmClose(false); initialInput.current?.focus(); }}>继续编辑链接</button><button className="button small" onClick={onClose}>放弃链接修改并关闭</button></div></div>}
     <div className="tag-dialog-body">
       <p className="help-text">链接绑定当前完整编号，保存后扫描或重启不会覆盖。清空输入并保存可移除链接。</p>
-      <p className="help-text">填写并保存 ES 帖子链接会自动标记 ES 已发布；Patreon 状态仍由你单独维护。移除链接不会撤回发布状态。</p>
+      <p className="help-text">首次填写并保存 Patreon / ES 帖子链接时，发布日期默认记当天；可在作品详情手动修改。填写并保存 ES 帖子链接会自动标记 ES 已发布；Patreon 状态仍由你单独维护。移除链接不会撤回发布状态或日期。</p>
       {error && <div className="notice error" role="alert"><span>{error}</span>{(conflict || !current) && <button className="button small" disabled={loading} onClick={() => setRetry(value => value + 1)}>{conflict ? '放弃输入并读取最新链接' : '重试读取链接'}</button>}</div>}
       {loading ? <p className="loading-state" role="status"><LoaderCircle className="spin" size={18} />正在读取发布链接</p> : current && <form id="work-links-form" className="work-links-form" onSubmit={event => void save(event)} noValidate>
         {linkTypes.map(({ kind, label, Icon }) => <div className={`work-link-field ${kind === initialKind ? 'chosen' : ''}`} key={kind}>
           <label htmlFor={`work-link-${kind}`}><Icon size={16} aria-hidden="true" />{label}</label>
           <input ref={kind === initialKind ? initialInput : undefined} id={`work-link-${kind}`} type="url" inputMode="url" autoComplete="off" spellCheck={false} maxLength={4000} placeholder="https://…" value={draft[kind]} disabled={saving || conflict} onChange={event => { setDraft(previous => ({ ...previous, [kind]: event.target.value })); setError(''); }} />
-          {safeLink(current.links[kind]) && <a href={safeLink(current.links[kind])!} target="_blank" rel="noreferrer">打开已保存的链接 <ExternalLink size={12} aria-hidden="true" /></a>}
+          {safeLink(current.links[kind]) && <div className="work-link-actions"><a href={safeLink(current.links[kind])!} target="_blank" rel="noreferrer">打开已保存的链接 <ExternalLink size={12} aria-hidden="true" /></a><button type="button" className="button small" aria-label={`复制已保存的${label}`} aria-busy={copyFeedback?.kind === kind && copyFeedback.status === 'copying'} onClick={() => void copySavedLink(kind)}>{copyFeedback?.kind === kind && copyFeedback.status === 'copied' ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}复制</button>{copyFeedback?.kind === kind && <span className={copyFeedback.status === 'failed' ? 'inline-error' : 'help-text'} role={copyFeedback.status === 'failed' ? 'alert' : 'status'}>{copyFeedback.status === 'copied' ? '已复制' : copyFeedback.status === 'failed' ? '复制失败，请手动复制输入框中的链接。' : '正在复制…'}</span>}</div>}
         </div>)}
       </form>}
     </div>

@@ -8,6 +8,7 @@ from urllib.parse import urlsplit
 
 from .scanner import HISTORY_FIELDS, pick
 from .store import Store, now
+from .release_dates import RELEASE_DATE_FIELDS, release_today, validate_release_date
 
 
 LINK_FIELDS = {
@@ -60,7 +61,7 @@ class WorkLinks:
         self.store = store
 
     def state(self, db, work_id: int) -> dict:
-        work = db.execute('SELECT metadata FROM works WHERE id=?', (work_id,)).fetchone()
+        work = db.execute('SELECT metadata,es_published_date,patreon_published_date FROM works WHERE id=?', (work_id,)).fetchone()
         if work is None:
             raise WorkLinksError('库存编号不存在', 404)
         metadata = json.loads(work['metadata'])
@@ -76,23 +77,41 @@ class WorkLinks:
                 except WorkLinksError:
                     # Historical notes or malformed cells are not executable links.
                     links[kind] = ''
-        return {'work_id': work_id, 'links': links, 'links_revision': row['revision'] if row else 0}
+        return {'work_id': work_id, 'links': links, 'links_revision': row['revision'] if row else 0,
+                **{field: work[field] for field in RELEASE_DATE_FIELDS}}
 
-    def update(self, work_id: int, changes: dict[str, str], expected_revision: int) -> dict:
-        if not changes or set(changes) - LINK_FIELDS.keys():
+    def update(self, work_id: int, changes: dict[str, str], expected_revision: int,
+               dates: dict[str, str | None] | None = None) -> dict:
+        dates = dates or {}
+        if (not changes and not dates) or set(changes) - LINK_FIELDS.keys() or set(dates) - set(RELEASE_DATE_FIELDS):
             raise WorkLinksError('请选择至少一种有效的链接类型')
         changes = {kind: validate_link(value) for kind, value in changes.items()}
+        try:
+            dates = {field: validate_release_date(value) for field, value in dates.items()}
+        except ValueError as error:
+            raise WorkLinksError(str(error)) from error
         with self.store.connection() as db:
             db.execute('BEGIN IMMEDIATE')
             current = self.state(db, work_id)
             if current['links_revision'] != expected_revision:
                 raise WorkLinksError('链接已被其他操作更新，请刷新后重试', 409)
+            for kind in ('es', 'patreon'):
+                field = f'{kind}_published_date'
+                if (field not in dates and changes.get(kind) and changes[kind] != current['links'][kind]
+                        and current[field] is None):
+                    dates[field] = release_today()
             row = db.execute('SELECT overrides FROM work_links WHERE work_id=?', (work_id,)).fetchone()
             overrides = json.loads(row['overrides']) if row else {}
             overrides.update(changes)
             db.execute('INSERT INTO work_links(work_id,overrides,revision) VALUES(?,?,?) ON CONFLICT(work_id) DO UPDATE SET overrides=excluded.overrides,revision=excluded.revision',
                        (work_id, json.dumps(overrides, ensure_ascii=False), expected_revision + 1))
             db.execute('UPDATE works SET updated_at=? WHERE id=?', (now(), work_id))
+            if dates:
+                work = db.execute('SELECT manual_fields FROM works WHERE id=?', (work_id,)).fetchone()
+                manual = set(json.loads(work['manual_fields'])) | dates.keys()
+                assignments = ','.join(f'{field}=?' for field in dates)
+                db.execute(f'UPDATE works SET {assignments},manual_fields=? WHERE id=?',
+                           [*dates.values(), json.dumps(sorted(manual)), work_id])
             if changes.get('es'):
                 work = db.execute('SELECT manual_fields FROM works WHERE id=?', (work_id,)).fetchone()
                 manual = set(json.loads(work['manual_fields'])) | {'es_published'}

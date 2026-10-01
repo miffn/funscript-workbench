@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS works (
  status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','published')),
  es_published INTEGER NOT NULL DEFAULT 0 CHECK(es_published IN (0,1)),
  patreon_published INTEGER NOT NULL DEFAULT 0 CHECK(patreon_published IN (0,1)),
+ es_published_date TEXT, patreon_published_date TEXT,
  notes TEXT NOT NULL DEFAULT '', metadata TEXT NOT NULL DEFAULT '{}', manual_fields TEXT NOT NULL DEFAULT '[]',
  created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
@@ -128,6 +129,10 @@ class Store:
             db.commit()
             db.execute('BEGIN IMMEDIATE')
             work_columns = {row[1] for row in db.execute('PRAGMA table_info(works)')}
+            # Existing links cannot establish the actual release date; leave it unknown.
+            for field in ('es_published_date', 'patreon_published_date'):
+                if field not in work_columns:
+                    db.execute(f'ALTER TABLE works ADD COLUMN {field} TEXT')
             for field in ('es_published', 'patreon_published'):
                 if field not in work_columns:
                     db.execute(f'ALTER TABLE works ADD COLUMN {field} INTEGER NOT NULL DEFAULT 0 CHECK({field} IN (0,1))')

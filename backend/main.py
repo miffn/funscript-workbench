@@ -11,7 +11,7 @@ from typing import Annotated, Literal
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, model_validator
 
 from .config import Config
 from .jobs import JobWorker
@@ -21,6 +21,11 @@ from .store import Store, now
 from .tags import TagService, TagError
 from .scan_roots import ScanRoots, ScanRootsError
 from .work_links import WorkLinks, WorkLinksError
+from .release_dates import RELEASE_DATE_FIELDS, validate_release_date
+from .profile import register_profile_routes
+
+
+ReleaseDate = Annotated[str | None, BeforeValidator(validate_release_date)]
 
 
 class WorkEdit(BaseModel):
@@ -29,6 +34,8 @@ class WorkEdit(BaseModel):
     status: str | None = None
     es_published: bool | None = Field(default=None, strict=True)
     patreon_published: bool | None = Field(default=None, strict=True)
+    es_published_date: ReleaseDate = None
+    patreon_published_date: ReleaseDate = None
     notes: str | None = Field(default=None, max_length=20000)
 
 
@@ -99,8 +106,16 @@ class WorkTagsEdit(BaseModel):
 
 class WorkLinksEdit(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    links: dict[Literal['patreon', 'video', 'script', 'es'], Annotated[str, Field(strict=True, max_length=4000)]] = Field(min_length=1, max_length=4)
+    links: dict[Literal['patreon', 'video', 'script', 'es'], Annotated[str, Field(strict=True, max_length=4000)]] = Field(default_factory=dict, max_length=4)
     expected_revision: int = Field(strict=True, ge=0)
+    es_published_date: ReleaseDate = None
+    patreon_published_date: ReleaseDate = None
+
+    @model_validator(mode='after')
+    def has_changes(self):
+        if not self.links and not self.model_fields_set.intersection(RELEASE_DATE_FIELDS):
+            raise ValueError('请至少填写一种链接或发布日期')
+        return self
 
 
 def create_app(config: Config | None = None, start_worker: bool = True) -> FastAPI:
@@ -126,6 +141,7 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
     app.state.worker = worker
     app.state.config = config
     app.state.tags = tags
+    register_profile_routes(app, store)
 
     @app.middleware("http")
     async def same_origin(request: Request, call_next):
@@ -308,7 +324,8 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
     @app.patch('/api/works/{work_id}/links')
     def update_work_links(work_id: int, options: WorkLinksEdit):
         try:
-            return links.update(work_id, options.links, options.expected_revision)
+            dates = {field: getattr(options, field) for field in RELEASE_DATE_FIELDS if field in options.model_fields_set}
+            return links.update(work_id, options.links, options.expected_revision, dates)
         except WorkLinksError as error:
             raise HTTPException(error.status_code, str(error))
 
@@ -344,7 +361,7 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
     @app.patch("/api/works/{work_id}")
     def edit_work(work_id: int, change: WorkEdit):
         changes = change.model_dump(exclude_unset=True)
-        if any(value is None for value in changes.values()):
+        if any(value is None for field, value in changes.items() if field not in RELEASE_DATE_FIELDS):
             raise HTTPException(422, "作品字段不能为 null")
         if "status" in changes and changes["status"] not in {"pending", "published"}:
             raise HTTPException(422, "发布状态应为 pending 或 published")
@@ -367,6 +384,8 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
                     changes['status'] = 'published' if es and patreon else 'pending'
                 assignments = ",".join(f"{field}=?" for field in changes)
                 db.execute(f"UPDATE works SET {assignments},manual_fields=?,updated_at=? WHERE id=?", [*changes.values(), json.dumps(sorted(manual_fields)), now(), work_id])
+                if set(changes).intersection(RELEASE_DATE_FIELDS):
+                    db.execute('INSERT INTO work_links(work_id,revision) VALUES(?,1) ON CONFLICT(work_id) DO UPDATE SET revision=work_links.revision+1', (work_id,))
             return details(db, require_work(db, work_id), include_assets=True)
 
     @app.get("/api/issues")

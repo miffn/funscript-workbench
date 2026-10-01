@@ -40,12 +40,14 @@ def test_history_initial_values_exposed_in_detail_and_list(inventory):
     with TestClient(app) as client:
         state = client.get(f'/api/works/{work_id}/links').json()
         assert state == {'work_id': work_id, 'links_revision': 0, 'links': {
-            kind: f'https://example.test/{kind}' for kind in ('patreon', 'video', 'script', 'es')}}
+            kind: f'https://example.test/{kind}' for kind in ('patreon', 'video', 'script', 'es')},
+            'es_published_date': None, 'patreon_published_date': None}
         detail = client.get(f'/api/works/{work_id}').json()
         listed = next(row for row in client.get('/api/works').json()['items'] if row['id'] == work_id)
         for result in (detail, listed):
             assert result['links'] == state['links']
             assert result['links_revision'] == 0
+            assert result['es_published_date'] is result['patreon_published_date'] is None
 
 
 def test_patch_preserves_other_fields_and_clear_overrides_history(inventory):

@@ -8,7 +8,7 @@ export interface Tag { id: number; category: TagCategory; name: string; support_
 export interface WorkTags { work_id: number; tags: Tag[]; tags_revision: number }
 export type WorkLinkKind = 'patreon' | 'video' | 'script' | 'es';
 export type WorkLinkValues = Record<WorkLinkKind, string>;
-export interface WorkLinks { work_id: number; links: WorkLinkValues; links_revision: number }
+export interface WorkLinks { work_id: number; links: WorkLinkValues; links_revision: number; es_published_date?: string | null; patreon_published_date?: string | null }
 export interface TagCatalog { items: Tag[]; categories: string[]; import_report?: Record<string, unknown> | null }
 export interface Work {
   id: number; script_id: string; title: string; status: Status; video_type?: string | null; axis_type?: string | null;
@@ -16,6 +16,7 @@ export interface Work {
   updated_at: string; notes?: string; assets?: Asset[]; metadata?: Record<string, unknown>; tags?: Tag[]; tags_revision?: number;
   links?: WorkLinkValues; links_revision?: number;
   es_published?: boolean; patreon_published?: boolean;
+  es_published_date?: string | null; patreon_published_date?: string | null;
 }
 export type PublicationPlatform = 'es' | 'patreon';
 export function isPublished(work: Work, platform: PublicationPlatform) { return work[`${platform}_published`] ?? work.status === 'published'; }

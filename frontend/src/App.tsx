@@ -3,6 +3,9 @@ import { Archive, ArrowLeft, ArrowRight, Check, CheckCheck, ChevronRight, Circle
 import { errorMessage, formatDate, isActiveJob, request } from './api';
 import type { Capabilities, Filter, Inventory, Job, Work, WorkLinkKind, WorkLinks, WorkTags } from './api';
 import { WorkLinkButtons, WorkLinkEditor } from './WorkLinks';
+import { ReleaseDates, workDisplayTitle } from './ReleaseDates';
+import { ProfileSettings } from './ProfileSettings';
+import type { ProfileData } from './ProfileSettings';
 import { TagChips, TagsPage, WorkTagEditor, useTagCatalog, tagCategories } from './Tags';
 import { Cover, EmptyState, Loading, WorkDetail, IssuesPage, JobsPage, SettingsPage, PublicationBadges } from './components';
 
@@ -36,6 +39,20 @@ export default function App() {
   const [untaggedOnly, setUntaggedOnly] = useState(false);
   const [capabilities, setCapabilities] = useState<Capabilities>({ can_open_folder: false, reason: '正在检查访问端能力' });
   const [notice, setNotice] = useState<Notice | null>(null);
+  const [profile, setProfile] = useState<ProfileData>({ name: 'Funscript', bio: '脚本工作台', avatar: null, revision: 0 });
+  const [profileLoading, setProfileLoading] = useState(true);
+  const [profileError, setProfileError] = useState('');
+  const [profileRetry, setProfileRetry] = useState(0);
+  useEffect(() => {
+    const controller = new AbortController(); setProfileLoading(true);
+    request<ProfileData>('/api/profile', { signal: controller.signal }).then(value => {
+      if (controller.signal.aborted) return;
+      if (typeof value.name !== 'string' || typeof value.bio !== 'string' || !Number.isInteger(value.revision)) throw new Error('资料格式无效');
+      setProfile(value); setProfileError('');
+    }).catch(error => { if (!controller.signal.aborted) setProfileError(`无法读取工作台资料：${errorMessage(error)}`); })
+      .finally(() => { if (!controller.signal.aborted) setProfileLoading(false); });
+    return () => controller.abort();
+  }, [profileRetry]);
   const [job, setJob] = useState<Job | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [theme, setTheme] = useState(document.documentElement.dataset.theme || 'light');
@@ -153,14 +170,14 @@ export default function App() {
     setRevision(value => value + 1); notify({ kind: 'success', message: '作品标签已保存' });
   };
   const linksSaved = (value: WorkLinks) => {
-    setInventory(previous => previous ? { ...previous, items: previous.items.map(work => work.id === value.work_id ? { ...work, links: value.links, links_revision: value.links_revision } : work) } : previous);
+    setInventory(previous => previous ? { ...previous, items: previous.items.map(work => work.id === value.work_id ? { ...work, links: value.links, links_revision: value.links_revision, es_published_date: value.es_published_date, patreon_published_date: value.patreon_published_date } : work) } : previous);
     setRevision(revision => revision + 1); notify({ kind: 'success', message: '发布链接已保存' });
   };
 
   return <div className="app-shell">
     <a className="skip-link" href="#main-content">跳到主要内容</a>
     <aside className="sidebar" aria-label="工作台导航">
-      <a className="brand" href="#" onClick={event => { event.preventDefault(); navigate('inventory'); }} aria-label="Funscript 工作台首页"><div className="brand-mark"><Archive size={21} aria-hidden="true" /></div><div><strong>Funscript</strong><small>脚本工作台</small></div></a>
+      <a className="brand" href="#/settings" onClick={event => { event.preventDefault(); navigate('settings'); }} aria-label="编辑工作台资料" title="修改头像、姓名和简介"><div className="brand-mark">{profile.avatar ? <img src={profile.avatar} alt={`${profile.name}的头像`} /> : <Archive size={21} aria-hidden="true" />}</div><div><strong>{profile.name}</strong><small>{profile.bio}</small></div></a>
       <div className="nav-section"><p className="section-label">作品库</p><nav className="nav-list">
         <button className={page === 'inventory' && filter === 'all' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('inventory')} aria-current={page === 'inventory' && filter === 'all' ? 'page' : undefined}><LayoutGrid size={18} /><span>全部库存</span>{inventory && <span className="nav-count">{stats.total}</span>}</button>
         <button className={page === 'inventory' && filter === 'pending' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('inventory', 'pending')} aria-current={page === 'inventory' && filter === 'pending' ? 'page' : undefined}><Clock3 size={18} /><span>待发布</span>{inventory && <span className="nav-count">{stats.pending}</span>}</button>
@@ -185,14 +202,14 @@ export default function App() {
         <div className="tag-inventory-filters"><label className="tag-filter"><span>按标签筛选</span><select value={tagId || ''} onChange={event => { setTagId(event.target.value ? Number(event.target.value) : null); setUntaggedOnly(false); setNumber(1); }}><option value="">全部标签</option>{tagCategories.map(([category, label]) => { const options = (catalog?.items || []).filter(tag => tag.category === category); return options.length ? <optgroup key={category} label={label}>{options.map(tag => <option key={tag.id} value={tag.id}>{label} · {tag.name}</option>)}</optgroup> : null; })}</select></label><label className="untagged-filter"><input type="checkbox" checked={untaggedOnly} onChange={event => { setUntaggedOnly(event.target.checked); setTagId(null); setNumber(1); }} />仅看未标注</label>{view === 'tags' && <span className="help-text">不加载封面，快速维护作品标签</span>}<div className="tag-color-legend" aria-label="标签颜色分类">{tagCategories.map(([category, label]) => <span className={`tag-chip ${category}`} key={category}>{label}</span>)}</div></div>
         {tagError && <div className="notice error" role="alert"><span>无法读取标签筛选：{tagError}</span><button className="button small" onClick={refreshTags}>重试</button></div>}
         {error && <div className="notice error" role="alert"><span><CircleAlert size={18} />无法更新库存：{error}。{inventory ? '当前显示上次读取的数据。' : ''}</span><button className="button small" onClick={() => setRevision(value => value + 1)}>重试</button></div>}
-        {loading ? <Loading /> : !inventory ? <EmptyState title="暂时无法读取库存" description="确认工作台服务已启动，然后重新连接。"><button className="button" onClick={() => setRevision(value => value + 1)}><RefreshCw size={16} />重新连接</button></EmptyState> : !inventory.items.length ? <EmptyState title={search || issuesOnly || tagId || untaggedOnly ? '没有符合条件的作品' : '这里还没有库存'} description={search || issuesOnly || tagId || untaggedOnly ? '换一个编号、标题或标签，或取消筛选。' : '在扫描目录建立编号文件夹后，点击“立即扫描”更新库存。'}>{(search || issuesOnly || tagId || untaggedOnly) && <button className="button" onClick={() => { setQuery(''); setSearch(''); setIssuesOnly(false); setTagId(null); setUntaggedOnly(false); }}>清除筛选</button>}</EmptyState> : view === 'tags' ? <div className="work-tag-list" aria-label="快速标签库存列表">{inventory.items.map(work => <article className="work-tag-row" key={work.id}><div className="work-tag-identity"><span className="script-id">{work.script_id}</span><PublicationBadges work={work} /><h2>{work.title || work.script_id}</h2></div><TagChips tags={work.tags} /><WorkLinkButtons work={work} onEdit={kind => setLinkWork({ work, kind })} /><button className="button small" onClick={() => setTagWork(work)} aria-label={`编辑标签 ${work.script_id}`}><TagIcon size={15} />编辑标签</button></article>)}</div> : <div className={`work-collection ${view}`} aria-label="库存作品">
-          {inventory.items.map(work => <article key={work.id} className="work-card"><button type="button" className="work-card-target" onClick={() => setSelected(work.id)} aria-label={`查看 ${work.script_id} ${work.title}`} /><Cover work={work} /><div className="work-info"><div className="work-topline"><span className="script-id">{work.script_id}</span><PublicationBadges work={work} /></div><h2>{work.title || work.script_id}</h2><TagChips tags={work.tags} /><div className="work-foot"><div className="work-foot-tools"><span className="asset-count"><Film size={14} />{work.video_count}<span className="separator" /><FileText size={14} />{work.script_count}</span><WorkLinkButtons work={work} onEdit={kind => setLinkWork({ work, kind })} /></div>{work.issues.length ? <span className="issue-label"><CircleAlert size={14} />{work.issues.length} 项异常</span> : <span className="work-type">{work.axis_type || work.video_type || '素材已关联'}</span>}</div></div></article>)}
+        {loading ? <Loading /> : !inventory ? <EmptyState title="暂时无法读取库存" description="确认工作台服务已启动，然后重新连接。"><button className="button" onClick={() => setRevision(value => value + 1)}><RefreshCw size={16} />重新连接</button></EmptyState> : !inventory.items.length ? <EmptyState title={search || issuesOnly || tagId || untaggedOnly ? '没有符合条件的作品' : '这里还没有库存'} description={search || issuesOnly || tagId || untaggedOnly ? '换一个编号、标题或标签，或取消筛选。' : '在扫描目录建立编号文件夹后，点击“立即扫描”更新库存。'}>{(search || issuesOnly || tagId || untaggedOnly) && <button className="button" onClick={() => { setQuery(''); setSearch(''); setIssuesOnly(false); setTagId(null); setUntaggedOnly(false); }}>清除筛选</button>}</EmptyState> : view === 'tags' ? <div className="work-tag-list" aria-label="快速标签库存列表">{inventory.items.map(work => <article className="work-tag-row" key={work.id}><div className="work-tag-identity"><span className="script-id">{work.script_id}</span><PublicationBadges work={work} /><ReleaseDates work={work} />{workDisplayTitle(work) && <h2>{workDisplayTitle(work)}</h2>}</div><TagChips tags={work.tags} /><WorkLinkButtons work={work} onEdit={kind => setLinkWork({ work, kind })} /><button className="button small" onClick={() => setTagWork(work)} aria-label={`编辑标签 ${work.script_id}`}><TagIcon size={15} />编辑标签</button></article>)}</div> : <div className={`work-collection ${view}`} aria-label="库存作品">
+          {inventory.items.map(work => <article key={work.id} className="work-card"><button type="button" className="work-card-target" onClick={() => setSelected(work.id)} aria-label={`查看 ${work.script_id} ${work.title}`} /><Cover work={work} /><div className="work-info"><div className="work-topline"><span className="script-id">{work.script_id}</span><PublicationBadges work={work} /></div><ReleaseDates work={work} />{workDisplayTitle(work) && <h2>{workDisplayTitle(work)}</h2>}<TagChips tags={work.tags} /><div className="work-foot"><div className="work-foot-tools"><span className="asset-count"><Film size={14} />{work.video_count}<span className="separator" /><FileText size={14} />{work.script_count}</span><WorkLinkButtons work={work} onEdit={kind => setLinkWork({ work, kind })} /></div>{work.issues.length ? <span className="issue-label"><CircleAlert size={14} />{work.issues.length} 项异常</span> : <span className="work-type">{work.axis_type || work.video_type || '素材已关联'}</span>}</div></div></article>)}
         </div>}
         {!!inventory?.total && <div className="pagination"><span>第 {Math.min(number, totalPages)} / {totalPages} 页 · 每页 {PAGE_SIZE} 个</span><div><button className="icon-button" aria-label="上一页" onClick={() => { setNumber(value => value - 1); window.scrollTo({ top: 0, behavior: 'auto' }); }} disabled={number <= 1 || loading}><ArrowLeft size={17} /></button><span aria-live="polite">{number}</span><button className="icon-button" aria-label="下一页" onClick={() => { setNumber(value => value + 1); window.scrollTo({ top: 0, behavior: 'auto' }); }} disabled={number >= totalPages || loading}><ArrowRight size={17} /></button></div></div>}
       </>}
       {page === 'issues' && <IssuesPage revision={revision} onSelect={setSelected} />}
       {page === 'jobs' && <JobsPage revision={revision} />}
-      {page === 'settings' && <SettingsPage capabilities={capabilities} revision={revision} />}
+      {page === 'settings' && <>{profileLoading ? <p className="loading-state" role="status">正在读取工作台资料…</p> : profileError ? <div className="notice error" role="alert"><span>{profileError}</span><button className="button small" onClick={() => setProfileRetry(value => value + 1)}>重试读取资料</button></div> : <ProfileSettings profile={profile} onSaved={value => { setProfile(value); notify({ kind: 'success', message: '工作台资料已保存' }); }} />}<SettingsPage capabilities={capabilities} revision={revision} /></>}
       {page === 'tags' && <TagsPage revision={revision} onChanged={() => setRevision(value => value + 1)} />}
       <footer className="page-footer"><span>Funscript 工作台</span><span>库存与状态保存在服务端</span></footer>
     </main>

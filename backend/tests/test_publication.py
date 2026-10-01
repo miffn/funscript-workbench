@@ -104,6 +104,7 @@ def test_legacy_sqlite_migration_links_and_restart_are_one_time(tmp_path):
         rows = db.execute('SELECT * FROM works ORDER BY id').fetchall()
         assert [(row['es_published'], row['patreon_published']) for row in rows] == [(1, 1), (0, 0), (1, 0), (0, 0), (0, 0)]
         assert all(row['updated_at'] == timestamp and row['title'] == 'Original title' for row in rows)
+        assert all(row['es_published_date'] is row['patreon_published_date'] is None for row in rows)
         db.execute("UPDATE works SET es_published=0,patreon_published=1,status='pending' WHERE id=1")
         db.execute('UPDATE works SET es_published=0 WHERE id=3')
     restarted = Store(data)
