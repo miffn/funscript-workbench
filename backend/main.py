@@ -488,14 +488,14 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
             raise HTTPException(error.status_code, str(error))
 
     @app.get("/api/works/{work_id}/preview/files/{filename}")
-    def preview_media(work_id: int, filename: str):
+    def preview_media(work_id: int, filename: str, inline: bool = False):
         try:
             path = worker.previews.media_path(work_id, filename)
         except PreviewError as error:
             raise HTTPException(error.status_code, str(error))
         kind = MEDIA_FILES[filename][0]
         return FileResponse(path, media_type={'video': 'video/webm', 'gif': 'image/gif', 'heatmap': 'image/png'}[kind], filename=filename,
-                            content_disposition_type="inline", headers={"Cache-Control": "private, max-age=3600"})
+                            content_disposition_type="inline" if inline else "attachment", headers={"Cache-Control": "private, max-age=3600"})
 
     @app.post("/api/works/{work_id}/preview/open-folder")
     def open_preview_folder(work_id: int, request: Request):

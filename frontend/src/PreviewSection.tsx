@@ -1,10 +1,45 @@
 import { useEffect, useRef, useState } from 'react';
-import { Check, CircleAlert, Download, FileText, FolderOpen, LoaderCircle, RefreshCw, Save, Scissors } from 'lucide-react';
+import { Check, CircleAlert, Download, Eye, FileText, FolderOpen, LoaderCircle, RefreshCw, Save, Scissors, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { ApiError, errorMessage, formatSize, isActiveJob, jobLabel, request } from './api';
-import type { Capabilities, Job, PreviewAxis, PreviewMatching, PreviewState, Work } from './api';
+import type { Capabilities, Job, PreviewAxis, PreviewFile, PreviewMatching, PreviewState, Work } from './api';
 
 const axes: [PreviewAxis, string][] = [['stroke', 'Stroke · 主轴'], ['surge', 'Surge · 前后'], ['sway', 'Sway · 左右'], ['twist', 'Twist · 扭转'], ['roll', 'Roll · 翻滚'], ['pitch', 'Pitch · 俯仰']];
 const sameMapping = (left: Partial<Record<PreviewAxis, number>>, right: Partial<Record<PreviewAxis, number>>) => axes.every(([axis]) => left[axis] === right[axis]);
+const mediaName = (file: PreviewFile, ordinal: number) => file.kind === 'heatmap' ? '完整时长热力图' : `片段 ${ordinal} · ${file.kind === 'gif' ? 'GIF' : 'WebM'}`;
+const inlineUrl = (url: string) => {
+  const [resource, fragment] = url.split('#', 2);
+  const separator = resource.indexOf('?');
+  const query = new URLSearchParams(separator < 0 ? '' : resource.slice(separator + 1));
+  query.set('inline', '1');
+  return `${separator < 0 ? resource : resource.slice(0, separator)}?${query}${fragment ? `#${fragment}` : ''}`;
+};
+
+function InlinePreview({ file, ordinal, onClose }: { file: PreviewFile; ordinal: number; onClose: () => void }) {
+  const [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState(false);
+  const [zoomed, setZoomed] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const containerRef = useRef<HTMLElement>(null);
+  const name = mediaName(file, ordinal);
+  const src = inlineUrl(file.url);
+  useEffect(() => {
+    containerRef.current?.focus({ preventScroll: true });
+    containerRef.current?.scrollIntoView?.({ block: 'nearest' });
+    const video = videoRef.current;
+    return () => { if (video) { video.pause(); video.removeAttribute('src'); video.load(); } };
+  }, []);
+  const loaded = () => setLoading(false);
+  const error = () => { setLoading(false); setFailed(true); };
+  return <section ref={containerRef} className="inline-preview" tabIndex={-1} aria-label={`正在查看 ${name}`}>
+    <div className="inline-preview-heading"><div><strong>{name}</strong><span>{file.width} × {file.height} · {formatSize(file.size)}</span></div><button type="button" className="button small" onClick={onClose} aria-label="关闭内容预览"><X size={16} aria-hidden="true" />关闭</button></div>
+    {loading && <p className="inline-preview-feedback" role="status"><LoaderCircle size={16} className="spin" aria-hidden="true" />正在加载{name}…</p>}
+    {failed && <p className="inline-error" role="alert">内容加载失败，可关闭后重新查看，或下载文件。</p>}
+    <div className={`inline-preview-media ${file.kind}${zoomed ? ' zoomed' : ''}`}>
+      {file.kind === 'video' ? <video ref={videoRef} src={src} controls playsInline preload="metadata" width={file.width} height={file.height} onLoadedMetadata={loaded} onError={error} aria-label={name} /> : <img src={src} alt={name} width={file.width} height={file.height} onLoad={loaded} onError={error} />}
+    </div>
+    <div className="inline-preview-tools">{file.kind === 'heatmap' && <button type="button" className="button small" aria-pressed={zoomed} onClick={() => setZoomed(value => !value)}>{zoomed ? <ZoomOut size={16} aria-hidden="true" /> : <ZoomIn size={16} aria-hidden="true" />}{zoomed ? '适应宽度' : '原尺寸查看'}</button>}<a href={file.url} download={file.filename} className="button small"><Download size={16} aria-hidden="true" />下载{name}</a>{file.kind === 'video' && <span className="help-text">点击播放器播放，可全屏查看。</span>}{file.kind === 'heatmap' && zoomed && <span className="help-text">横向滚动查看细节。</span>}</div>
+  </section>;
+}
 
 export function PreviewSection({ work, capabilities, onSourcesChanged, onDirtyChange }: { work: Work; capabilities: Capabilities; onSourcesChanged?: () => Promise<void> | void; onDirtyChange?: (dirty: boolean) => void }) {
   const [data, setData] = useState<PreviewState | null>(null);
@@ -23,6 +58,7 @@ export function PreviewSection({ work, capabilities, onSourcesChanged, onDirtyCh
   const [revision, setRevision] = useState(0);
   const [matchingRevision, setMatchingRevision] = useState(0);
   const [videoId, setVideoId] = useState<number | null>(null);
+  const [selectedMedia, setSelectedMedia] = useState<{ workId: number; filename: string } | null>(null);
   const submitLock = useRef(false);
   const dataRef = useRef<PreviewState | null>(null);
   const matchingRef = useRef<PreviewMatching | null>(null);
@@ -42,6 +78,7 @@ export function PreviewSection({ work, capabilities, onSourcesChanged, onDirtyCh
   useEffect(() => { onDirtyChange?.(dirty); }, [dirty, onDirtyChange]);
   const generationBlocked = !selected || !data || !matching || !!loadError || !!matchingLoadError || dirty || !!matching.issues.length || !Object.keys(draft).length || busy;
   const files = data?.files || [];
+  const viewedFile = selectedMedia?.workId === work.id ? files.find(file => file.filename === selectedMedia.filename) : undefined;
   const clipFiles = files.filter(file => file.kind !== 'heatmap');
   const heatmaps = files.filter(file => file.kind === 'heatmap');
   const clipIndices = [...new Set(clipFiles.map(file => file.clip_index))].sort((left, right) => left - right);
@@ -173,7 +210,13 @@ export function PreviewSection({ work, capabilities, onSourcesChanged, onDirtyCh
     {data?.job && <div className={`preview-progress ${data.job.status === 'failed' ? 'failed' : ''}`} role="status" aria-live="polite" aria-atomic="true"><div><span>{data.job.message || (active ? data.job.status === 'running' ? '正在后台处理视频与脚本' : '任务已加入后台队列' : data.job.status === 'failed' ? '预览生成失败' : '预览任务已完成')}</span>{progress !== undefined && <strong>{progress}%</strong>}</div>{active && <progress max={100} value={progress} aria-label="预览生成进度" />}</div>}
     {loadError && <div className="preview-error" role="alert"><p><CircleAlert size={15} />{loadError}</p><button className="button small" onClick={() => setRevision(value => value + 1)}><RefreshCw size={14} />重试读取状态</button></div>}
     {(actionError || jobError) && <p className="inline-error preview-error-text" role="alert">{actionError || `预览生成失败：${jobError}`}{files.length > 0 && ' 之前生成的结果仍可使用。'}</p>}
-    {files.length > 0 && <div className="preview-results"><div className="preview-results-heading"><strong>{active || data?.job?.status === 'failed' ? '已有预览' : '预览结果'}</strong><span>{files.length} 个文件</span></div>{clipIndices.map((index, ordinal) => <div className="preview-clip" key={index}><span>片段 {ordinal + 1}</span><div>{clipFiles.filter(file => file.clip_index === index).map(file => <a key={file.filename} href={file.url} download={file.filename} className="preview-file" title={`${file.filename} · ${file.width}×${file.height} · ${formatSize(file.size)}`}><Download size={14} aria-hidden="true" /><span>{file.kind === 'gif' ? 'GIF' : 'WebM'}</span><small>{formatSize(file.size)}</small><span className="sr-only">片段 {ordinal + 1} · {file.filename}</span></a>)}</div></div>)}{heatmaps.length > 0 && <div className="preview-clip"><span>热力图</span><div>{heatmaps.map(file => <a key={file.filename} href={file.url} download={file.filename} className="preview-file" title={`${file.filename} · ${file.width}×${file.height} · ${formatSize(file.size)}`}><Download size={14} aria-hidden="true" /><span>PNG</span><small>{formatSize(file.size)}</small><span className="sr-only">完整时长热力图 · {file.filename}</span></a>)}</div></div>}<p className="help-text">点击链接下载，不会自动播放视频或加载 GIF。</p>{!heatmaps.length && !active && <p className="help-text">现有结果尚无热力图，点击“一键生成预览”即可补齐。</p>}</div>}
+    {files.length > 0 && <div className="preview-results">
+      <div className="preview-results-heading"><strong>{active || data?.job?.status === 'failed' ? '已有预览' : '预览结果'}</strong><span>{files.length} 个文件</span></div>
+      {viewedFile && <InlinePreview key={`${work.id}:${viewedFile.filename}:${viewedFile.url}:${viewedFile.size}:${viewedFile.width}:${viewedFile.height}`} file={viewedFile} ordinal={clipIndices.indexOf(viewedFile.clip_index) + 1} onClose={() => setSelectedMedia(null)} />}
+      {clipIndices.map((index, ordinal) => <div className="preview-clip" key={index}><span>片段 {ordinal + 1}</span><div>{clipFiles.filter(file => file.clip_index === index).map(file => <div className="preview-file-actions" key={file.filename}><button type="button" className="button small preview-view-button" onClick={() => setSelectedMedia({ workId: work.id, filename: file.filename })} aria-label={`查看片段 ${ordinal + 1} ${file.kind === 'gif' ? 'GIF' : 'WebM'}`} aria-pressed={viewedFile?.filename === file.filename}><Eye size={15} aria-hidden="true" />查看 {file.kind === 'gif' ? 'GIF' : 'WebM'}</button><a href={file.url} download={file.filename} className="preview-file" title={`${file.filename} · ${file.width}×${file.height} · ${formatSize(file.size)}`}><Download size={14} aria-hidden="true" /><span>{file.kind === 'gif' ? 'GIF' : 'WebM'}</span><small>{formatSize(file.size)}</small><span className="sr-only">片段 {ordinal + 1} · {file.filename}</span></a></div>)}</div></div>)}
+      {heatmaps.length > 0 && <div className="preview-clip"><span>热力图</span><div>{heatmaps.map(file => <div className="preview-file-actions" key={file.filename}><button type="button" className="button small preview-view-button" onClick={() => setSelectedMedia({ workId: work.id, filename: file.filename })} aria-label="查看完整时长热力图" aria-pressed={viewedFile?.filename === file.filename}><Eye size={15} aria-hidden="true" />查看热力图</button><a href={file.url} download={file.filename} className="preview-file" title={`${file.filename} · ${file.width}×${file.height} · ${formatSize(file.size)}`}><Download size={14} aria-hidden="true" /><span>PNG</span><small>{formatSize(file.size)}</small><span className="sr-only">完整时长热力图 · {file.filename}</span></a></div>)}</div></div>}
+      <p className="help-text">点击“查看”在网页预览，视频需手动播放；下载按钮单独保存文件。</p>{!heatmaps.length && !active && <p className="help-text">现有结果尚无热力图，点击“一键生成预览”即可补齐。</p>}
+    </div>}
     {files.length > 0 && <><button className="button small preview-open-folder" onClick={() => void openFolder()} disabled={!capabilities.can_open_folder || opening}>{opening ? <LoaderCircle className="spin" size={15} /> : <FolderOpen size={15} />}{opening ? '正在发送打开请求' : '打开预览文件夹'}</button>{data?.windows_path && <code className="preview-output-path">{data.windows_path}</code>}<p className="host-note">{capabilities.can_open_folder ? '在素材所在 Windows 主机上打开预览目录。' : '不支持打开预览文件夹，仅素材所在主机可用。'}</p></>}
     {openingMessage && <p className="preview-open-message" role="status"><Check size={15} />{openingMessage}</p>}
   </section>;

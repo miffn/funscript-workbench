@@ -22,6 +22,8 @@ let getError: boolean;
 let postCount: number;
 
 beforeEach(() => {
+  vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined);
+  vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => undefined);
   currentWork = work; saveConflict = false;
   matchingState = { work_id: 7, video_asset_id: 9, mode: 'auto', revision: 0, script_asset_ids: { stroke: 21 }, issues: [], videos: work.assets!, scripts: [{ id: 21, name: 'main.funscript', relative_path: 'main.funscript', directory_id: 12, kind: 'script', axis: 'stroke', size: 10 }, { id: 22, name: 'other.funscript', relative_path: 'other.funscript', directory_id: 12, kind: 'script', size: 10 }], job: null, source_changed: false };
   state = { ...empty }; postCount = 0; postError = null; getError = false;
@@ -53,6 +55,79 @@ beforeEach(() => {
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value: function(this: HTMLDialogElement) { this.open = true; } });
 });
 afterEach(() => { vi.useRealTimers(); cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+
+describe('inline generated media preview', () => {
+  const heatmap: PreviewFile = { filename: '热力图.png', kind: 'heatmap', clip_index: 0, width: 2048, height: 690, size: 4096, url: '/api/works/7/preview/files/heatmap.png?v=first' };
+  it('loads only the requested video, GIF or heatmap and keeps separate download links', async () => {
+    state = { ...empty, files: [...outputFiles.map(file => ({ ...file, url: `${file.url}?v=first` })), heatmap] };
+    render(<PreviewSection work={work} capabilities={remote} />);
+    await screen.findByRole('button', { name: '查看完整时长热力图' });
+    expect(document.querySelector('video, img')).toBeNull();
+    expect(screen.getAllByRole('link')).toHaveLength(9);
+    fireEvent.click(screen.getByRole('button', { name: '查看片段 1 WebM' }));
+    const video = document.querySelector('video')!;
+    expect(video.getAttribute('src')).toBe(`${outputFiles[0].url}?v=first&inline=1`);
+    expect(video.controls).toBe(true);
+    expect(video.preload).toBe('metadata');
+    expect(video.autoplay).toBe(false);
+    expect(video.hasAttribute('playsinline')).toBe(true);
+    expect(document.querySelector('img')).toBeNull();
+    fireEvent.loadedMetadata(video);
+    expect(screen.queryByText(/正在加载片段/)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '查看片段 1 GIF' }));
+    expect(document.querySelector('video')).toBeNull();
+    expect(HTMLMediaElement.prototype.pause).toHaveBeenCalledOnce();
+    expect(HTMLMediaElement.prototype.load).toHaveBeenCalledOnce();
+    const gif = screen.getByRole('img', { name: '片段 1 · GIF' });
+    expect(gif.getAttribute('src')).toBe(`${outputFiles[1].url}?v=first&inline=1`);
+    fireEvent.load(gif);
+    fireEvent.click(screen.getByRole('button', { name: '查看完整时长热力图' }));
+    expect(screen.queryByRole('img', { name: '片段 1 · GIF' })).toBeNull();
+    expect(screen.getByRole('img', { name: '完整时长热力图' }).getAttribute('src')).toBe(`${heatmap.url}&inline=1`);
+    fireEvent.click(screen.getByRole('button', { name: '原尺寸查看' }));
+    expect(document.querySelector('.inline-preview-media.zoomed')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '适应宽度' }));
+    expect(document.querySelector('.inline-preview-media.zoomed')).toBeNull();
+    expect(screen.getByRole('link', { name: '下载完整时长热力图' }).getAttribute('href')).toBe(heatmap.url);
+    fireEvent.click(screen.getByRole('button', { name: '关闭内容预览' }));
+    expect(document.querySelector('video, img')).toBeNull();
+    expect(screen.getAllByRole('link')).toHaveLength(9);
+    expect(screen.getAllByRole('link').every(link => link.hasAttribute('download'))).toBe(true);
+  });
+
+  it('keeps the selected media during polling and remounts it when its version changes', async () => {
+    state = { ...empty, files: [{ ...outputFiles[0], url: `${outputFiles[0].url}?v=first` }] };
+    vi.useFakeTimers();
+    await act(async () => { render(<PreviewSection work={work} capabilities={local} />); });
+    fireEvent.click(screen.getByRole('button', { name: '查看片段 1 WebM' }));
+    const video = document.querySelector('video')!;
+    fireEvent.loadedMetadata(video);
+    await act(async () => { await vi.advanceTimersByTimeAsync(10000); });
+    expect(document.querySelector('video')).toBe(video);
+    expect(screen.queryByText(/正在加载片段/)).toBeNull();
+    state = { ...state, files: [{ ...state.files[0], url: `${outputFiles[0].url}?v=second` }] };
+    await act(async () => { await vi.advanceTimersByTimeAsync(10000); });
+    const replacement = document.querySelector('video')!;
+    expect(replacement).not.toBe(video);
+    expect(replacement.getAttribute('src')).toBe(`${outputFiles[0].url}?v=second&inline=1`);
+    expect(screen.getByText(/正在加载片段/)).toBeTruthy();
+    expect(HTMLMediaElement.prototype.pause).toHaveBeenCalledOnce();
+    expect(screen.getByRole('button', { name: '查看片段 1 WebM' }).getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('shows media errors without removing downloads and closing stops the video', async () => {
+    state = { ...empty, files: outputFiles };
+    const view = render(<PreviewSection work={work} capabilities={local} />);
+    fireEvent.click(await screen.findByRole('button', { name: '查看片段 2 WebM' }));
+    fireEvent.error(document.querySelector('video')!);
+    expect(screen.getByText(/内容加载失败/)).toBeTruthy();
+    expect(screen.queryByText(/正在加载片段/)).toBeNull();
+    expect(screen.getAllByRole('link')).toHaveLength(9);
+    view.unmount();
+    expect(HTMLMediaElement.prototype.pause).toHaveBeenCalledOnce();
+    expect(HTMLMediaElement.prototype.load).toHaveBeenCalledOnce();
+  });
+});
 
 describe('preview generation workflow', () => {
   it('shows the full-length heatmap separately from four clips and keeps legacy results usable', async () => {

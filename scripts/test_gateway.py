@@ -3,6 +3,7 @@ import base64
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import threading
+from types import SimpleNamespace
 
 import pytest
 
@@ -158,9 +159,9 @@ def fake_directories(monkeypatch, resolved=None, unavailable=()):
 def test_launcher_accepts_backend_authorized_custom_root(monkeypatch, root, path):
     fake_directories(monkeypatch)
     launched = []
-    monkeypatch.setattr(windows_gateway.subprocess, "Popen", lambda args, **kwargs: launched.append((args, kwargs)))
+    monkeypatch.setattr(windows_gateway, "open_folder_window", launched.append)
     windows_gateway.launch_folder(encode(path), encode(root))
-    assert launched == [([r"C:\Windows\explorer.exe", path], {"shell": False})]
+    assert launched == [path]
 
 
 def test_launcher_rejects_junction_escape(monkeypatch):
@@ -206,3 +207,37 @@ def test_missing_upstream_root_returns_open_failure(gateways):
     headers = {"Host": "localhost:8788", "Origin": "http://localhost:8788"}
     status, body = request(local, "POST", headers, "{}", "/api/works/1/open-folder")
     assert status == 502 and "打开文件夹失败" in body.decode("utf-8")
+
+
+def test_folder_activation_keeps_path_as_data_and_runs_hidden(monkeypatch):
+    launched, activated = [], []
+    path = r"E:\中文素材\S029 $(not-a-command) '"
+    monkeypatch.setattr(windows_gateway.subprocess, 'Popen', lambda args, **kwargs: launched.append((args, kwargs)))
+    def run(args, **kwargs):
+        activated.append((args, kwargs))
+        return SimpleNamespace(returncode=0, stdout='{"hwnd": 123, "visible": true, "foreground": true}')
+    monkeypatch.setattr(windows_gateway.subprocess, 'run', run)
+    windows_gateway.open_folder_window(path)
+    assert launched[0][0][-1] == path and launched[0][1]['shell'] is False
+    args, options = activated[0]
+    assert args[args.index('-WindowStyle') + 1] == 'Hidden'
+    script = base64.b64decode(args[-1]).decode('utf-16-le')
+    assert path not in script and 'SetForegroundWindow' in script and 'ShowWindowAsync' in script
+    assert base64.b64decode(options['env']['WORKBENCH_OPEN_FOLDER_B64']).decode('utf-8') == path
+    assert options['shell'] is False and options['timeout'] == 12
+
+
+@pytest.mark.parametrize('code,output', [(1, ''), (0, 'not json'), (0, '{"visible":false}')])
+def test_folder_activation_failure_is_reported(monkeypatch, code, output):
+    monkeypatch.setattr(windows_gateway.subprocess, 'Popen', lambda *args, **kwargs: None)
+    monkeypatch.setattr(windows_gateway.subprocess, 'run', lambda *args, **kwargs: SimpleNamespace(returncode=code, stdout=output))
+    with pytest.raises(OSError):
+        windows_gateway.open_folder_window(r'E:\素材\S029')
+
+
+def test_folder_activation_timeout_returns_gateway_failure(gateways, monkeypatch):
+    def timeout(*args):
+        raise windows_gateway.subprocess.TimeoutExpired('activation', 12)
+    monkeypatch.setattr(windows_gateway, 'launch_folder', timeout)
+    local, _ = gateways
+    assert request(local, 'POST', {'Host': 'localhost:8788', 'Origin': 'http://localhost:8788'}, '{}', '/api/works/1/open-folder')[0] == 502

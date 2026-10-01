@@ -134,6 +134,14 @@ def test_preview_api_generate_persists_and_serves_fixed_media(previews, monkeypa
             fetched = client.get(media["url"])
             assert fetched.status_code == 200 and len(fetched.content) == media["size"]
             assert fetched.headers["content-type"] == {'video': 'video/webm', 'gif': 'image/gif', 'heatmap': 'image/png'}[media['kind']]
+            assert fetched.headers['content-disposition'].startswith('attachment;')
+            inline_url = media['url'] + ('&' if '?' in media['url'] else '?') + 'inline=1'
+            displayed = client.get(inline_url)
+            assert displayed.headers['content-disposition'].startswith('inline;')
+            assert displayed.headers['content-type'] == fetched.headers['content-type']
+            assert displayed.content == fetched.content
+            ranged = client.get(inline_url, headers={'Range': 'bytes=0-3'})
+            assert ranged.status_code == 206 and ranged.content == fetched.content[:4]
         assert client.get(f"/api/works/{work['id']}/preview/files/manifest.json").status_code == 404
         assert client.get(f"/api/works/{work['id']}/preview/files/{quote('main.mp4')}").status_code == 404
         assert client.get(f"/api/works/{work['id']}/preview/files/%2e%2e%2fmain.mp4").status_code == 404

@@ -6,6 +6,8 @@ import base64
 import http.client
 import logging
 import ntpath
+import os
+import json
 import re
 import subprocess
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -16,6 +18,106 @@ HOP_HEADERS = {"connection", "keep-alive", "proxy-authenticate", "proxy-authoriz
                "te", "trailer", "transfer-encoding", "upgrade", "x-workbench-host-key",
                "x-workbench-open-folder", "x-workbench-folder-root"}
 MAX_BODY = 1024 * 1024
+
+# The hidden gateway has no foreground window. Locate only the requested Explorer
+# folder, restore it and surface that window without changing global focus policy.
+FOLDER_ACTIVATION_SCRIPT = r'''
+$ErrorActionPreference = 'Stop'
+$folder = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:WORKBENCH_OPEN_FOLDER_B64))
+Add-Type -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+public static class WorkbenchFolderWindow {
+    [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
+    [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+    [DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr h, int command);
+    [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+    [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] public static extern int GetWindowLong(IntPtr h, int index);
+    [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int w, int z, uint flags);
+    [DllImport("kernel32.dll")] private static extern uint GetCurrentThreadId();
+    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr h, out uint process);
+    [DllImport("user32.dll")] private static extern bool AttachThreadInput(uint first, uint second, bool attach);
+    [DllImport("user32.dll")] private static extern bool BringWindowToTop(IntPtr h);
+    public static void Activate(IntPtr h) {
+        if (SetForegroundWindow(h)) return;
+        uint process;
+        uint current = GetCurrentThreadId();
+        var attached = new HashSet<uint>();
+        try {
+            foreach (uint thread in new uint[] {
+                GetWindowThreadProcessId(GetForegroundWindow(), out process),
+                GetWindowThreadProcessId(h, out process) }) {
+                if (thread != 0 && thread != current && !attached.Contains(thread)
+                    && AttachThreadInput(current, thread, true)) attached.Add(thread);
+            }
+            BringWindowToTop(h);
+            SetForegroundWindow(h);
+        } finally {
+            foreach (uint thread in attached) AttachThreadInput(current, thread, false);
+        }
+    }
+}
+'@
+$shell = New-Object -ComObject Shell.Application
+$deadline = [DateTime]::UtcNow.AddSeconds(6)
+$target = $null
+do {
+    foreach ($window in $shell.Windows()) {
+        try {
+            if ([IO.Path]::GetFileName($window.FullName) -ine 'explorer.exe') { continue }
+            $location = [string]$window.Document.Folder.Self.Path
+            if ($location.TrimEnd('\') -ieq $folder.TrimEnd('\')) { $target = $window; break }
+        } catch { }
+    }
+    if ($null -ne $target) { break }
+    Start-Sleep -Milliseconds 150
+} while ([DateTime]::UtcNow -lt $deadline)
+if ($null -eq $target) { throw 'The requested Explorer window did not become ready' }
+$handle = [IntPtr]([long]$target.HWND)
+$show = if ([WorkbenchFolderWindow]::IsIconic($handle)) { 9 } else { 5 }
+[void][WorkbenchFolderWindow]::ShowWindowAsync($handle, $show)
+# Keep cross-thread activation isolated in this short-lived helper. The gateway
+# enforces a timeout so an unresponsive Explorer cannot block other requests.
+[WorkbenchFolderWindow]::Activate($handle)
+# A background process may be denied keyboard focus by Windows. A temporary
+# z-order change still displays the requested folder; do not leave it pinned.
+$wasTopmost = ([WorkbenchFolderWindow]::GetWindowLong($handle, -20) -band 8) -ne 0
+if (-not $wasTopmost) {
+    try {
+        [void][WorkbenchFolderWindow]::SetWindowPos($handle, [IntPtr](-1), 0, 0, 0, 0, 0x4043)
+    } finally {
+        [void][WorkbenchFolderWindow]::SetWindowPos($handle, [IntPtr](-2), 0, 0, 0, 0, 0x4043)
+    }
+}
+[void][WorkbenchFolderWindow]::SetForegroundWindow($handle)
+Start-Sleep -Milliseconds 100
+@{ hwnd = [long]$handle; visible = [WorkbenchFolderWindow]::IsWindowVisible($handle);
+   foreground = [WorkbenchFolderWindow]::GetForegroundWindow() -eq $handle } | ConvertTo-Json -Compress
+'''
+
+
+def open_folder_window(path):
+    windows = os.environ.get('WINDIR', r'C:\Windows')
+    subprocess.Popen([ntpath.join(windows, 'explorer.exe'), path], shell=False)
+    environment = os.environ.copy()
+    environment['WORKBENCH_OPEN_FOLDER_B64'] = base64.b64encode(path.encode('utf-8')).decode('ascii')
+    script = base64.b64encode(FOLDER_ACTIVATION_SCRIPT.encode('utf-16-le')).decode('ascii')
+    result = subprocess.run(
+        [ntpath.join(windows, r'System32\WindowsPowerShell\v1.0\powershell.exe'),
+         '-NoLogo', '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-EncodedCommand', script],
+        shell=False, env=environment, capture_output=True, text=True, timeout=12,
+        creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+    if result.returncode:
+        raise OSError('Unable to surface the requested Explorer window')
+    try:
+        state = json.loads(result.stdout.strip().lstrip('\ufeff'))
+        if state.get('visible') is not True:
+            raise ValueError('Explorer window is not visible')
+    except (ValueError, AttributeError) as error:
+        raise OSError('Unable to verify Explorer window visibility') from error
+    logging.info('Explorer window surfaced: hwnd=%s foreground=%s', state.get('hwnd'), state.get('foreground'))
 
 
 def decode_folder_path(encoded):
@@ -55,7 +157,7 @@ def launch_folder(encoded_path, encoded_root=None):
     resolved, resolved_root = str(folder.resolve(strict=True)), str(root_folder.resolve(strict=True))
     if not inside_folder_root(ntpath.normpath(resolved), ntpath.normpath(resolved_root)):
         raise ValueError("Folder resolves outside the authorized root")
-    subprocess.Popen([r"C:\Windows\explorer.exe", path], shell=False)
+    open_folder_window(path)
 
 
 def request_headers(headers, key: str | None):
@@ -111,8 +213,8 @@ class GatewayHandler(BaseHTTPRequestHandler):
             if folder and self.server.host_key and self.command == "POST" and response.status == 200 and re.fullmatch(r"/api/works/\d+/(?:preview/)?open-folder", self.path):
                 try:
                     launch_folder(folder, folder_root)
-                except (OSError, ValueError):
-                    return self.fail(502, "打开文件夹失败，请检查目录是否仍存在")
+                except (OSError, ValueError, subprocess.TimeoutExpired):
+                    return self.fail(502, "打开文件夹失败，请检查目录和资源管理器是否可用")
             self.send_response(response.status, response.reason)
             for name, value in response.getheaders():
                 if name.lower() not in HOP_HEADERS | {"content-length", "server", "date"}:
