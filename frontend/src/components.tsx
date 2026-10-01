@@ -8,6 +8,7 @@ import { PreviewSection } from './PreviewSection';
 import { TagChips, WorkTagEditor } from './Tags';
 import { ScanRootsEditor } from './ScanRootsEditor';
 import { ReleaseDates, workDisplayTitle } from './ReleaseDates';
+import { ReleasePostEditor } from './ReleasePosts';
 
 export function StatusBadge({ status }: { status: 'pending' | 'published' }) { return <span className={`badge ${status}`}><span className="status-dot" />{status === 'published' ? '已发布' : '待发布'}</span>; }
 export function PublicationBadges({ work }: { work: Work }) { return <span className="publication-badges">{(['es', 'patreon'] as const).map(platform => <span key={platform} className={`badge ${isPublished(work, platform) ? 'published' : 'pending'}`}><span className="status-dot" />{platform === 'es' ? 'ES' : 'Patreon'} {isPublished(work, platform) ? '已发布' : '待发布'}</span>)}</span>; }
@@ -78,6 +79,7 @@ export function WorkDetail({ id, capabilities, onClose, onSaved, notify }: { id:
   const [directoryId, setDirectoryId] = useState<number | null>(null);
   const [tab, setTab] = useState<'assets' | 'metadata'>('assets');
   const [editingTags, setEditingTags] = useState(false);
+  const [editingPost, setEditingPost] = useState(false);
   const [matchingDirty, setMatchingDirty] = useState(false);
   const [retry, setRetry] = useState(0);
   const dialog = useRef<HTMLDialogElement>(null);
@@ -135,6 +137,7 @@ export function WorkDetail({ id, capabilities, onClose, onSaved, notify }: { id:
         <section className="detail-section"><div className="section-heading"><Folder size={17} /><h3>作品目录</h3></div>{work.directories.length > 1 && <p className="help-text">同一编号关联了多个目录，打开前请选择具体路径。</p>}<div className="directory-options">{work.directories.map(directory => <label className={`directory-option ${directory.id === directoryId ? 'selected' : ''}`} key={directory.id}><input type="radio" name="directory" value={directory.id} checked={directory.id === directoryId} onChange={() => setDirectoryId(directory.id)} /><span><code>{directory.windows_path || directory.path}</code>{!directory.available && <small>目录暂不可用</small>}</span></label>)}</div>{!work.directories.length && <p className="help-text">尚无可关联的本地目录。</p>}
           <button className="button open-folder" onClick={() => void open()} disabled={!capabilities.can_open_folder || !directoryId || !currentDir?.available || opening}>{opening ? <LoaderCircle className="spin" size={17} /> : <FolderOpen size={17} />}{opening ? '正在发送打开请求' : '打开文件夹'}</button><p className="host-note">{!capabilities.can_open_folder ? capabilities.reason || '不支持打开，仅素材所在主机可用' : !directoryId ? '请先选择要打开的目录。' : !currentDir?.available ? '所选目录暂不可用，请检查原文件夹。' : '在素材所在 Windows 主机的资源管理器中打开。'}</p></section>
         <section className="detail-section"><div className="section-heading"><h3>作品标签</h3><button className="button small detail-edit-tags" onClick={() => setEditingTags(true)}>编辑标签</button></div><TagChips tags={work.tags} /></section>
+        <section className="detail-section"><div className="section-heading"><FileText size={17} /><h3>ES 贴文</h3></div><p className="help-text">根据作品标签和发布链接套用模板，近期作品预览每次生成时自动更新。上传 Markdown 和生成稿保存在数据库中。</p><button className="button primary" onClick={() => setEditingPost(true)}><FileText size={17} />生成贴文</button>{dirty && <p className="help-text">贴文使用已保存的作品信息；修改标题后请先保存。</p>}</section>
         <PreviewSection work={work} capabilities={capabilities} onDirtyChange={setMatchingDirty} onSourcesChanged={async () => {
           const updated = await request<Work>(`/api/works/${id}`);
           // Refresh discovered source data while retaining locally edited text and tags.
@@ -149,6 +152,7 @@ export function WorkDetail({ id, capabilities, onClose, onSaved, notify }: { id:
       <div className="detail-actions">{saveError && <p className="inline-error" role="alert">{saveError}</p>}<div><div className="publication-controls">{(['es', 'patreon'] as const).map(platform => <button key={platform} className="button" disabled={changingStatus || saving} onClick={() => void changeStatus(platform)}>{changingStatus ? <LoaderCircle size={16} className="spin" /> : isPublished(work, platform) ? <Clock3 size={16} /> : <CheckCheck size={16} />}{isPublished(work, platform) ? `将 ${platform === 'es' ? 'ES' : 'Patreon'} 改为待发布` : `标记 ${platform === 'es' ? 'ES' : 'Patreon'} 已发布`}</button>)}</div><button className="button primary" type="submit" form="work-edit-form" disabled={!dirty || saving || changingStatus}>{saving ? <LoaderCircle className="spin" size={16} /> : <Check size={16} />}{saving ? '正在保存' : '保存信息'}</button></div></div>
     </>}
     {work && editingTags && <WorkTagEditor work={work} onClose={() => setEditingTags(false)} onSaved={value => { setWork(previous => previous ? { ...previous, tags: value.tags, tags_revision: value.tags_revision } : previous); onSaved(); }} />}
+    {work && editingPost && <ReleasePostEditor workId={id} onClose={() => setEditingPost(false)} />}
   </dialog>;
 }
 

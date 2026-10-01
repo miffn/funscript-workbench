@@ -5,6 +5,7 @@ import type { Capabilities, Filter, Inventory, Job, Work, WorkLinkKind, WorkLink
 import { WorkLinkButtons, WorkLinkEditor } from './WorkLinks';
 import { ReleaseDates, workDisplayTitle } from './ReleaseDates';
 import { ProfileSettings } from './ProfileSettings';
+import { EsTemplateSettings } from './ReleasePosts';
 import type { ProfileData } from './ProfileSettings';
 import { TagChips, TagsPage, WorkTagEditor, useTagCatalog, tagCategories } from './Tags';
 import { Cover, EmptyState, Loading, WorkDetail, IssuesPage, JobsPage, SettingsPage, PublicationBadges } from './components';
@@ -209,7 +210,7 @@ export default function App() {
       </>}
       {page === 'issues' && <IssuesPage revision={revision} onSelect={setSelected} />}
       {page === 'jobs' && <JobsPage revision={revision} />}
-      {page === 'settings' && <>{profileLoading ? <p className="loading-state" role="status">正在读取工作台资料…</p> : profileError ? <div className="notice error" role="alert"><span>{profileError}</span><button className="button small" onClick={() => setProfileRetry(value => value + 1)}>重试读取资料</button></div> : <ProfileSettings profile={profile} onSaved={value => { setProfile(value); notify({ kind: 'success', message: '工作台资料已保存' }); }} />}<SettingsPage capabilities={capabilities} revision={revision} /></>}
+      {page === 'settings' && <>{profileLoading ? <p className="loading-state" role="status">正在读取工作台资料…</p> : profileError ? <div className="notice error" role="alert"><span>{profileError}</span><button className="button small" onClick={() => setProfileRetry(value => value + 1)}>重试读取资料</button></div> : <ProfileSettings profile={profile} onSaved={value => { setProfile(value); notify({ kind: 'success', message: '工作台资料已保存' }); }} />}<EsTemplateSettings /><SettingsPage capabilities={capabilities} revision={revision} /></>}
       {page === 'tags' && <TagsPage revision={revision} onChanged={() => setRevision(value => value + 1)} />}
       <footer className="page-footer"><span>Funscript 工作台</span><span>库存与状态保存在服务端</span></footer>
     </main>
