@@ -3,7 +3,7 @@ export type Filter = 'all' | Status;
 export interface Issue { type: string; message: string; script_id?: string; work_id?: number | null; paths?: string[] }
 export interface Directory { id: number; windows_path: string; path: string; available: boolean }
 export interface Asset { id: number; name: string; relative_path: string; kind: string; axis?: string | null; size: number; directory_id: number }
-export type TagCategory = 'author' | 'video_type' | 'release_type' | 'tier' | 'custom';
+export type TagCategory = 'author' | 'video_type' | 'axis_type' | 'release_type' | 'tier' | 'custom';
 export interface Tag { id: number; category: TagCategory; name: string; support_url: string | null; support_status: 'unknown' | 'none' | 'url'; revision: number; usage_count: number; support_candidates?: string[] }
 export interface WorkTags { work_id: number; tags: Tag[]; tags_revision: number }
 export interface TagCatalog { items: Tag[]; categories: string[]; import_report?: Record<string, unknown> | null }

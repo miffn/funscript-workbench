@@ -51,7 +51,7 @@ CREATE TABLE IF NOT EXISTS history (
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS tags (
  id INTEGER PRIMARY KEY,
- category TEXT NOT NULL CHECK(category IN ('author','video_type','release_type','tier','custom')),
+ category TEXT NOT NULL CHECK(category IN ('author','video_type','axis_type','release_type','tier','custom')),
  name TEXT NOT NULL, name_key TEXT NOT NULL,
  support_url TEXT,
  support_status TEXT NOT NULL DEFAULT 'unknown' CHECK(support_status IN ('unknown','none','url')),
@@ -87,6 +87,24 @@ class Store:
         self.path = data_dir / "workbench.sqlite3"
         with self.connection() as db:
             db.executescript(SCHEMA)
+            tag_schema = db.execute("SELECT sql FROM sqlite_master WHERE name='tags'").fetchone()[0]
+            if "'axis_type'" not in tag_schema:
+                # Rebuild only the category constraint; preserve IDs, bindings and revisions.
+                db.execute("PRAGMA foreign_keys=OFF")
+                db.execute("BEGIN IMMEDIATE")
+                try:
+                    db.execute(tag_schema.replace("CREATE TABLE tags", "CREATE TABLE tags_expanded", 1).replace("'video_type'", "'video_type','axis_type'", 1))
+                    db.execute("INSERT INTO tags_expanded SELECT * FROM tags")
+                    db.execute("DROP TABLE tags")
+                    db.execute("ALTER TABLE tags_expanded RENAME TO tags")
+                    if db.execute("PRAGMA foreign_key_check").fetchall():
+                        raise RuntimeError("标签迁移发现无效关联")
+                    db.commit()
+                except Exception:
+                    db.rollback()
+                    raise
+                finally:
+                    db.execute("PRAGMA foreign_keys=ON")
             if "inputs" not in {row[1] for row in db.execute("PRAGMA table_info(jobs)")}:
                 db.execute("ALTER TABLE jobs ADD COLUMN inputs TEXT NOT NULL DEFAULT '{}'")
 

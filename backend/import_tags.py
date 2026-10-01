@@ -15,6 +15,7 @@ from .tags import TagError, validate_name, validate_url, validate_selection
 FIELDS = {
     "author": ("Creator", "Author", "作者"),
     "video_type": ("Video Type", "video_type", "视频类型"),
+    "axis_type": ("Axis Type", "axis_type", "轴类型"),
     "release_type": ("Release Type", "release_type", "发布类型"),
     "tier": ("Slot Type", "Tier", "tier", "档位"),
 }

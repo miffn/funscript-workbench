@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import App from './App';
 import { TagsPage, WorkTagEditor } from './Tags';
 import { WorkDetail } from './components';
@@ -45,6 +45,24 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe('quick tagging without media', () => {
+  it.each(['gallery', 'list', 'tags'])('shows categorized labels in %s mode and exposes every filter category', async (view) => {
+    const axis = makeTag(11, 'axis_type', '多轴');
+    catalog.push(axis);
+    binding.tags = [catalog[0], catalog[2], axis, catalog[4], catalog[6], catalog[8]];
+    localStorage.setItem('workbench-view', view);
+    render(<App />);
+    const row = view === 'tags' ? (await screen.findByRole('button', { name: '编辑标签 S025_001' })).closest('article')! : await screen.findByRole('button', { name: '查看 S025_001 作品标题' });
+    for (const [category, name] of [['author', '作者 A'], ['video_type', 'Real'], ['axis_type', '多轴'], ['release_type', 'Paid'], ['tier', 'Main Tier'], ['custom', '短片']]) {
+      expect(row.querySelector(`.tag-chip.${category}`)?.textContent).toContain(name);
+    }
+    const select = screen.getByLabelText('按标签筛选');
+    for (const label of ['作者', '视频类型', '轴类型', '发布类型', '档位', '自定义分类']) expect(within(select).getByRole('group', { name: label })).toBeTruthy();
+    for (const id of [3, 11, 5, 7, 9]) {
+      fireEvent.change(select, { target: { value: String(id) } });
+      await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => new URL(url, 'http://localhost').searchParams.get('tag_id') === String(id))).toBe(true));
+    }
+  });
+
   it('renders the saved tag-list preference and edits labels without any cover or preview request', async () => {
     localStorage.setItem('workbench-view', 'tags'); render(<App />);
     await screen.findByRole('button', { name: '编辑标签 S025_001' });

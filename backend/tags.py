@@ -5,11 +5,37 @@ from urllib.parse import urlsplit
 
 from .store import Store
 
-CATEGORIES = ("author", "video_type", "release_type", "tier", "custom")
+CATEGORIES = ("author", "video_type", "axis_type", "release_type", "tier", "custom")
 SINGLE_CATEGORIES = set(CATEGORIES) - {"custom"}
 RELEASE_NAMES = {"free sample": "Free Sample", "paid": "Paid"}
 TIER_NAMES = {"free": "Free", "main tier": "Main Tier", "extra tier": "Extra Tier"}
 VIDEO_NAMES = {"real": "Real", "anime": "Anime", "3dcg": "3DCG", "vam": "VAM"}
+AXIS_NAMES = {"single-axis": "单轴", "single axis": "单轴", "multi-axis": "多轴", "multi axis": "多轴"}
+
+
+def sync_axis_tag(db, work_id: int, initialize=False):
+    """Classify scanned axes without overwriting any manual tag decision."""
+    state = db.execute("SELECT manual_edited FROM work_tag_state WHERE work_id=?", (work_id,)).fetchone()
+    current = db.execute("SELECT t.id,t.name,wt.source FROM tags t JOIN work_tags wt ON wt.tag_id=t.id WHERE wt.work_id=? AND t.category='axis_type'", (work_id,)).fetchone()
+    if current and (initialize or current["source"] != "scan"):
+        return
+    if not initialize and state and state[0]:
+        return
+    axes = {row[0] for row in db.execute("SELECT a.axis FROM assets a JOIN directories d ON d.id=a.directory_id WHERE d.work_id=? AND d.available=1 AND a.kind='script' AND a.axis IS NOT NULL", (work_id,))}
+    metadata = json.loads(db.execute("SELECT metadata FROM works WHERE id=?", (work_id,)).fetchone()[0])
+    historical = metadata.get("axis_type") or metadata.get("Axis Type") or metadata.get("轴类型")
+    name = ("多轴" if len(axes) > 1 else "单轴") if axes else historical
+    if not isinstance(name, str) or not name.strip():
+        return
+    name = validate_name("axis_type", name)
+    if current and current["name"] == name:
+        return
+    db.execute("INSERT OR IGNORE INTO tags(category,name,name_key) VALUES('axis_type',?,?)", (name, name.casefold()))
+    tag_id = db.execute("SELECT id FROM tags WHERE category='axis_type' AND name_key=?", (name.casefold(),)).fetchone()[0]
+    if current:
+        db.execute("DELETE FROM work_tags WHERE work_id=? AND tag_id=?", (work_id, current["id"]))
+    db.execute("INSERT INTO work_tags(work_id,tag_id,source) VALUES(?,?,?)", (work_id, tag_id, "scan" if axes else "import"))
+    db.execute("INSERT INTO work_tag_state(work_id,revision) VALUES(?,1) ON CONFLICT(work_id) DO UPDATE SET revision=work_tag_state.revision+1", (work_id,))
 
 
 class TagError(ValueError):
@@ -31,6 +57,8 @@ def validate_name(category: str, name: str) -> str:
         if name.casefold() not in enum:
             raise TagError("发布类型只支持 Free Sample / Paid" if category == "release_type" else "档位只支持 Free / Main Tier / Extra Tier")
         return enum[name.casefold()]
+    if category == "axis_type":
+        return AXIS_NAMES.get(name.casefold(), name)
     return VIDEO_NAMES.get(name.casefold(), name) if category == "video_type" else name
 
 
@@ -84,7 +112,7 @@ def validate_selection(tags: list[dict]):
     for tag in tags:
         category = tag["category"]
         if category in SINGLE_CATEGORIES and category in categories:
-            raise TagError("作者、视频类型、发布类型和档位每类只能选择一个标签")
+            raise TagError("作者、视频类型、轴类型、发布类型和档位每类只能选择一个标签")
         categories[category] = tag["name"]
     release, tier = categories.get("release_type"), categories.get("tier")
     if release and tier and ((release == "Free Sample" and tier != "Free") or (release == "Paid" and tier == "Free")):
@@ -94,6 +122,14 @@ def validate_selection(tags: list[dict]):
 class TagService:
     def __init__(self, store: Store):
         self.store = store
+        with store.connection() as db:
+            if db.execute("SELECT 1 FROM settings WHERE key='axis_tags_initialized'").fetchone():
+                return
+            db.execute("BEGIN IMMEDIATE")
+            if not db.execute("SELECT 1 FROM settings WHERE key='axis_tags_initialized'").fetchone():
+                for work in db.execute("SELECT id FROM works").fetchall():
+                    sync_axis_tag(db, work[0], initialize=True)
+                db.execute("INSERT INTO settings(key,value) VALUES('axis_tags_initialized','true')")
 
     def tag(self, db, tag_id: int) -> dict:
         row = db.execute("SELECT t.*,count(wt.work_id) AS usage_count FROM tags t LEFT JOIN work_tags wt ON wt.tag_id=t.id WHERE t.id=? GROUP BY t.id", (tag_id,)).fetchone()

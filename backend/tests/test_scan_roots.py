@@ -72,9 +72,10 @@ def test_settings_default_saved_restart_and_no_implicit_scan(inventory):
 def test_settings_invalid_request_does_not_write(inventory, payload):
     config, store, _ = inventory
     with TestClient(create_app(config, start_worker=False)) as client:
+        before_settings = table(store, "settings")
         assert client.put("/api/settings/scan-roots", json=payload).status_code == 422
         assert client.get("/api/settings").json()["scan_roots_revision"] == 0
-    assert table(store, "settings") == []
+    assert table(store, "settings") == before_settings
 
 
 def test_settings_conflict_and_same_origin(inventory):

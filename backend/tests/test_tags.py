@@ -32,6 +32,12 @@ def inventory(tmp_path):
     scanner = Scanner(store, config)
     scanner.scan()
     with store.connection() as db:
+        # These tests start from an intentionally unclassified tag catalog.
+        # Automatic axis classification is covered separately in test_axis_tags.py.
+        db.execute("DELETE FROM work_tags")
+        db.execute("DELETE FROM work_tag_state")
+        db.execute("DELETE FROM tags")
+        db.execute("INSERT OR REPLACE INTO settings(key,value) VALUES('axis_tags_initialized','true')")
         works = {row["script_id"]: row["id"] for row in db.execute("SELECT id,script_id FROM works")}
         db.execute("UPDATE works SET title='保留标题',notes='保留备注',status='published',metadata=? WHERE id=?", (json.dumps({"video_type": "3DCG", "es_url": "https://example.com/old-post"}), works["S071"]))
     return config, store, scanner, works
