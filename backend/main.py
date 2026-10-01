@@ -20,6 +20,7 @@ from .previews import MEDIA_FILES, PreviewError
 from .store import Store, now
 from .tags import TagService, TagError
 from .scan_roots import ScanRoots, ScanRootsError
+from .work_links import WorkLinks, WorkLinksError
 
 
 class WorkEdit(BaseModel):
@@ -80,12 +81,19 @@ class WorkTagsEdit(BaseModel):
     expected_revision: int = Field(strict=True, ge=0)
 
 
+class WorkLinksEdit(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    links: dict[Literal['patreon', 'video', 'script', 'es'], Annotated[str, Field(strict=True, max_length=4000)]] = Field(min_length=1, max_length=4)
+    expected_revision: int = Field(strict=True, ge=0)
+
+
 def create_app(config: Config | None = None, start_worker: bool = True) -> FastAPI:
     config = config or Config.from_environment()
     store = Store(config.data_dir)
     worker = JobWorker(store, config)
     tags = TagService(store)
     scan_roots = ScanRoots(store, config)
+    links = WorkLinks(store)
 
     @asynccontextmanager
     async def lifespan(app):
@@ -122,6 +130,9 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
         metadata = enrich_metadata(json.loads(record["metadata"]))
         record.pop("manual_fields", None)
         record["metadata"] = metadata
+        link_state = links.state(db, record["id"])
+        record["links"] = link_state["links"]
+        record["links_revision"] = link_state["links_revision"]
         tag_state = tags.work_state(db, record["id"])
         record["tags"] = tag_state["tags"]
         record["tags_revision"] = tag_state["tags_revision"]
@@ -256,6 +267,21 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
     @app.get("/api/tags")
     def tag_catalog():
         return tags.catalog()
+
+    @app.get('/api/works/{work_id}/links')
+    def work_links(work_id: int):
+        try:
+            with store.connection() as db:
+                return links.state(db, work_id)
+        except WorkLinksError as error:
+            raise HTTPException(error.status_code, str(error))
+
+    @app.patch('/api/works/{work_id}/links')
+    def update_work_links(work_id: int, options: WorkLinksEdit):
+        try:
+            return links.update(work_id, options.links, options.expected_revision)
+        except WorkLinksError as error:
+            raise HTTPException(error.status_code, str(error))
 
     @app.post("/api/tags", status_code=201)
     def create_tag(options: TagCreate):

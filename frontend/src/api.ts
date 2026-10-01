@@ -6,11 +6,15 @@ export interface Asset { id: number; name: string; relative_path: string; kind: 
 export type TagCategory = 'author' | 'video_type' | 'axis_type' | 'release_type' | 'tier' | 'custom';
 export interface Tag { id: number; category: TagCategory; name: string; support_url: string | null; support_status: 'unknown' | 'none' | 'url'; revision: number; usage_count: number; support_candidates?: string[] }
 export interface WorkTags { work_id: number; tags: Tag[]; tags_revision: number }
+export type WorkLinkKind = 'patreon' | 'video' | 'script' | 'es';
+export type WorkLinkValues = Record<WorkLinkKind, string>;
+export interface WorkLinks { work_id: number; links: WorkLinkValues; links_revision: number }
 export interface TagCatalog { items: Tag[]; categories: string[]; import_report?: Record<string, unknown> | null }
 export interface Work {
   id: number; script_id: string; title: string; status: Status; video_type?: string | null; axis_type?: string | null;
   video_count: number; script_count: number; cover_url: string | null; issues: Issue[]; directories: Directory[];
   updated_at: string; notes?: string; assets?: Asset[]; metadata?: Record<string, unknown>; tags?: Tag[]; tags_revision?: number;
+  links?: WorkLinkValues; links_revision?: number;
 }
 export interface Job { id: number; type: string; status: string; created_at: string; started_at?: string | null; finished_at?: string | null; progress?: number; message?: string; result?: Record<string, unknown> | null; error?: string | null }
 export type PreviewAxis = 'stroke' | 'surge' | 'sway' | 'twist' | 'roll' | 'pitch';

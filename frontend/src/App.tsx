@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Archive, ArrowLeft, ArrowRight, Check, CheckCheck, ChevronRight, CircleAlert, Clock3, FileText, Film, LayoutGrid, List, LoaderCircle, Moon, RefreshCw, Search, Settings2, SlidersHorizontal, Sun, Tag as TagIcon, X } from 'lucide-react';
 import { errorMessage, formatDate, isActiveJob, request } from './api';
-import type { Capabilities, Filter, Inventory, Job, Work, WorkTags } from './api';
+import type { Capabilities, Filter, Inventory, Job, Work, WorkLinkKind, WorkLinks, WorkTags } from './api';
+import { WorkLinkButtons, WorkLinkEditor } from './WorkLinks';
 import { TagChips, TagsPage, WorkTagEditor, useTagCatalog, tagCategories } from './Tags';
 import { Cover, EmptyState, Loading, WorkDetail, IssuesPage, JobsPage, SettingsPage, StatusBadge } from './components';
 
@@ -30,6 +31,7 @@ export default function App() {
   const [revision, setRevision] = useState(0);
   const [selected, setSelected] = useState<number | null>(null);
   const [tagWork, setTagWork] = useState<Work | null>(null);
+  const [linkWork, setLinkWork] = useState<{ work: Work; kind: WorkLinkKind } | null>(null);
   const [tagId, setTagId] = useState<number | null>(null);
   const [untaggedOnly, setUntaggedOnly] = useState(false);
   const [capabilities, setCapabilities] = useState<Capabilities>({ can_open_folder: false, reason: '正在检查访问端能力' });
@@ -150,6 +152,10 @@ export default function App() {
     setInventory(previous => previous ? { ...previous, items: previous.items.map(work => work.id === value.work_id ? { ...work, tags: value.tags, tags_revision: value.tags_revision } : work) } : previous);
     setRevision(value => value + 1); notify({ kind: 'success', message: '作品标签已保存' });
   };
+  const linksSaved = (value: WorkLinks) => {
+    setInventory(previous => previous ? { ...previous, items: previous.items.map(work => work.id === value.work_id ? { ...work, links: value.links, links_revision: value.links_revision } : work) } : previous);
+    setRevision(revision => revision + 1); notify({ kind: 'success', message: '发布链接已保存' });
+  };
 
   return <div className="app-shell">
     <a className="skip-link" href="#main-content">跳到主要内容</a>
@@ -179,8 +185,8 @@ export default function App() {
         <div className="tag-inventory-filters"><label className="tag-filter"><span>按标签筛选</span><select value={tagId || ''} onChange={event => { setTagId(event.target.value ? Number(event.target.value) : null); setUntaggedOnly(false); setNumber(1); }}><option value="">全部标签</option>{tagCategories.map(([category, label]) => { const options = (catalog?.items || []).filter(tag => tag.category === category); return options.length ? <optgroup key={category} label={label}>{options.map(tag => <option key={tag.id} value={tag.id}>{label} · {tag.name}</option>)}</optgroup> : null; })}</select></label><label className="untagged-filter"><input type="checkbox" checked={untaggedOnly} onChange={event => { setUntaggedOnly(event.target.checked); setTagId(null); setNumber(1); }} />仅看未标注</label>{view === 'tags' && <span className="help-text">不加载封面，快速维护作品标签</span>}<div className="tag-color-legend" aria-label="标签颜色分类">{tagCategories.map(([category, label]) => <span className={`tag-chip ${category}`} key={category}>{label}</span>)}</div></div>
         {tagError && <div className="notice error" role="alert"><span>无法读取标签筛选：{tagError}</span><button className="button small" onClick={refreshTags}>重试</button></div>}
         {error && <div className="notice error" role="alert"><span><CircleAlert size={18} />无法更新库存：{error}。{inventory ? '当前显示上次读取的数据。' : ''}</span><button className="button small" onClick={() => setRevision(value => value + 1)}>重试</button></div>}
-        {loading ? <Loading /> : !inventory ? <EmptyState title="暂时无法读取库存" description="确认工作台服务已启动，然后重新连接。"><button className="button" onClick={() => setRevision(value => value + 1)}><RefreshCw size={16} />重新连接</button></EmptyState> : !inventory.items.length ? <EmptyState title={search || issuesOnly || tagId || untaggedOnly ? '没有符合条件的作品' : '这里还没有库存'} description={search || issuesOnly || tagId || untaggedOnly ? '换一个编号、标题或标签，或取消筛选。' : '在扫描目录建立编号文件夹后，点击“立即扫描”更新库存。'}>{(search || issuesOnly || tagId || untaggedOnly) && <button className="button" onClick={() => { setQuery(''); setSearch(''); setIssuesOnly(false); setTagId(null); setUntaggedOnly(false); }}>清除筛选</button>}</EmptyState> : view === 'tags' ? <div className="work-tag-list" aria-label="快速标签库存列表">{inventory.items.map(work => <article className="work-tag-row" key={work.id}><div className="work-tag-identity"><span className="script-id">{work.script_id}</span><StatusBadge status={work.status} /><h2>{work.title || work.script_id}</h2></div><TagChips tags={work.tags} /><button className="button small" onClick={() => setTagWork(work)} aria-label={`编辑标签 ${work.script_id}`}><TagIcon size={15} />编辑标签</button></article>)}</div> : <div className={`work-collection ${view}`} aria-label="库存作品">
-          {inventory.items.map(work => <button key={work.id} className="work-card" onClick={() => setSelected(work.id)} aria-label={`查看 ${work.script_id} ${work.title}`}><Cover work={work} /><div className="work-info"><div className="work-topline"><span className="script-id">{work.script_id}</span><StatusBadge status={work.status} /></div><h2>{work.title || work.script_id}</h2><TagChips tags={work.tags} /><div className="work-foot"><span className="asset-count"><Film size={14} />{work.video_count}<span className="separator" /><FileText size={14} />{work.script_count}</span>{work.issues.length ? <span className="issue-label"><CircleAlert size={14} />{work.issues.length} 项异常</span> : <span className="work-type">{work.axis_type || work.video_type || '素材已关联'}</span>}</div></div></button>)}
+        {loading ? <Loading /> : !inventory ? <EmptyState title="暂时无法读取库存" description="确认工作台服务已启动，然后重新连接。"><button className="button" onClick={() => setRevision(value => value + 1)}><RefreshCw size={16} />重新连接</button></EmptyState> : !inventory.items.length ? <EmptyState title={search || issuesOnly || tagId || untaggedOnly ? '没有符合条件的作品' : '这里还没有库存'} description={search || issuesOnly || tagId || untaggedOnly ? '换一个编号、标题或标签，或取消筛选。' : '在扫描目录建立编号文件夹后，点击“立即扫描”更新库存。'}>{(search || issuesOnly || tagId || untaggedOnly) && <button className="button" onClick={() => { setQuery(''); setSearch(''); setIssuesOnly(false); setTagId(null); setUntaggedOnly(false); }}>清除筛选</button>}</EmptyState> : view === 'tags' ? <div className="work-tag-list" aria-label="快速标签库存列表">{inventory.items.map(work => <article className="work-tag-row" key={work.id}><div className="work-tag-identity"><span className="script-id">{work.script_id}</span><StatusBadge status={work.status} /><h2>{work.title || work.script_id}</h2></div><TagChips tags={work.tags} /><WorkLinkButtons work={work} onEdit={kind => setLinkWork({ work, kind })} /><button className="button small" onClick={() => setTagWork(work)} aria-label={`编辑标签 ${work.script_id}`}><TagIcon size={15} />编辑标签</button></article>)}</div> : <div className={`work-collection ${view}`} aria-label="库存作品">
+          {inventory.items.map(work => <article key={work.id} className="work-card"><button type="button" className="work-card-target" onClick={() => setSelected(work.id)} aria-label={`查看 ${work.script_id} ${work.title}`} /><Cover work={work} /><div className="work-info"><div className="work-topline"><span className="script-id">{work.script_id}</span><StatusBadge status={work.status} /></div><h2>{work.title || work.script_id}</h2><TagChips tags={work.tags} /><div className="work-foot"><div className="work-foot-tools"><span className="asset-count"><Film size={14} />{work.video_count}<span className="separator" /><FileText size={14} />{work.script_count}</span><WorkLinkButtons work={work} onEdit={kind => setLinkWork({ work, kind })} /></div>{work.issues.length ? <span className="issue-label"><CircleAlert size={14} />{work.issues.length} 项异常</span> : <span className="work-type">{work.axis_type || work.video_type || '素材已关联'}</span>}</div></div></article>)}
         </div>}
         {!!inventory?.total && <div className="pagination"><span>第 {Math.min(number, totalPages)} / {totalPages} 页 · 每页 {PAGE_SIZE} 个</span><div><button className="icon-button" aria-label="上一页" onClick={() => { setNumber(value => value - 1); window.scrollTo({ top: 0, behavior: 'auto' }); }} disabled={number <= 1 || loading}><ArrowLeft size={17} /></button><span aria-live="polite">{number}</span><button className="icon-button" aria-label="下一页" onClick={() => { setNumber(value => value + 1); window.scrollTo({ top: 0, behavior: 'auto' }); }} disabled={number >= totalPages || loading}><ArrowRight size={17} /></button></div></div>}
       </>}
@@ -192,5 +198,6 @@ export default function App() {
     </main>
     {selected !== null && <WorkDetail id={selected} capabilities={capabilities} onClose={() => setSelected(null)} onSaved={() => setRevision(value => value + 1)} notify={notify} />}
     {tagWork && <WorkTagEditor work={tagWork} onClose={() => setTagWork(null)} onSaved={tagsSaved} />}
+    {linkWork && <WorkLinkEditor work={linkWork.work} initialKind={linkWork.kind} onClose={() => setLinkWork(null)} onSaved={linksSaved} />}
   </div>;
 }

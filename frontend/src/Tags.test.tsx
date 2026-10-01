@@ -52,7 +52,7 @@ describe('quick tagging without media', () => {
     binding.tags = [catalog[0], catalog[2], axis, catalog[4], catalog[6], catalog[8]];
     localStorage.setItem('workbench-view', view);
     render(<App />);
-    const row = view === 'tags' ? (await screen.findByRole('button', { name: '编辑标签 S025_001' })).closest('article')! : await screen.findByRole('button', { name: '查看 S025_001 作品标题' });
+    const row = (await screen.findByRole('button', { name: view === 'tags' ? '编辑标签 S025_001' : '查看 S025_001 作品标题' })).closest('article')!;
     for (const [category, name] of [['author', '作者 A'], ['video_type', 'Real'], ['axis_type', '多轴'], ['release_type', 'Paid'], ['tier', 'Main Tier'], ['custom', '短片']]) {
       expect(row.querySelector(`.tag-chip.${category}`)?.textContent).toContain(name);
     }

@@ -82,6 +82,11 @@ CREATE TABLE IF NOT EXISTS preview_bindings (
  revision INTEGER NOT NULL DEFAULT 1,
  PRIMARY KEY(work_id,video_path)
 );
+CREATE TABLE IF NOT EXISTS work_links (
+ work_id INTEGER PRIMARY KEY REFERENCES works(id),
+ overrides TEXT NOT NULL DEFAULT '{}',
+ revision INTEGER NOT NULL DEFAULT 0
+);
 CREATE INDEX IF NOT EXISTS idx_assets_directory ON assets(directory_id);
 CREATE INDEX IF NOT EXISTS idx_directories_work ON directories(work_id);
 CREATE INDEX IF NOT EXISTS idx_issues_work ON issues(work_id);
