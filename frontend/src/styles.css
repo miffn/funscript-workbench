@@ -84,3 +84,10 @@
 @media (max-width: 560px) { .profile-settings { padding: 20px; } .profile-avatar-editor { align-items: flex-start; gap: 12px; } }
 
 .brand-mark{overflow:hidden;flex-shrink:0}.brand-mark img{width:100%;height:100%;object-fit:cover}.brand>div:last-child{min-width:0}.brand strong,.brand small{overflow-wrap:anywhere}
+/* Duration is automatically derived from source videos and remains read-only. */
+:root{--tag-duration-bg:#dff3f3;--tag-duration-fg:#176069}
+:root[data-theme=dark]{--tag-duration-bg:#1f3f43;--tag-duration-fg:#a6e2e6}
+.duration{--tag-bg:var(--tag-duration-bg);--tag-fg:var(--tag-duration-fg)}
+.duration-unknown{border:1px dashed var(--tag-duration-fg);background:var(--surface)}
+.duration-tag-readonly{margin-top:18px;padding:13px 14px;border:1px solid var(--line);border-radius:9px;background:var(--bg)}
+.duration-tag-readonly .help-text{margin-top:9px}.duration-catalog-help{margin:-8px 0 20px}.duration-readonly-label{white-space:nowrap;flex-shrink:0}

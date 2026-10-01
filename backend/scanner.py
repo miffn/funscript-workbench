@@ -307,6 +307,8 @@ class Scanner:
                        "scanned_roots": [str(root.path) for root in roots]}
             if target_id is None:
                 db.execute("INSERT OR REPLACE INTO settings(key,value) VALUES('last_scan',?)", (json.dumps({"at": timestamp, **summary}, ensure_ascii=False),))
+        from .durations import refresh_all_duration
+        summary['durations'] = refresh_all_duration(self.store, self.config, sorted(affected))
         return summary
 
     def excluded_output(self, path: Path) -> bool:

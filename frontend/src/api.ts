@@ -3,7 +3,7 @@ export type Filter = 'all' | Status | 'es_published' | 'patreon_published';
 export interface Issue { type: string; message: string; script_id?: string; work_id?: number | null; paths?: string[] }
 export interface Directory { id: number; windows_path: string; path: string; available: boolean }
 export interface Asset { id: number; name: string; relative_path: string; kind: string; axis?: string | null; size: number; directory_id: number }
-export type TagCategory = 'author' | 'video_type' | 'axis_type' | 'release_type' | 'tier' | 'custom';
+export type TagCategory = 'author' | 'video_type' | 'axis_type' | 'release_type' | 'tier' | 'duration' | 'custom';
 export interface Tag { id: number; category: TagCategory; name: string; support_url: string | null; support_status: 'unknown' | 'none' | 'url'; revision: number; usage_count: number; support_candidates?: string[] }
 export interface WorkTags { work_id: number; tags: Tag[]; tags_revision: number }
 export type WorkLinkKind = 'patreon' | 'video' | 'script' | 'es';
@@ -17,6 +17,8 @@ export interface Work {
   links?: WorkLinkValues; links_revision?: number;
   es_published?: boolean; patreon_published?: boolean;
   es_published_date?: string | null; patreon_published_date?: string | null;
+  duration_seconds?: number | null; duration_minutes?: number | null; duration_status?: string; duration_error?: string | null;
+  duration_last_known_seconds?: number | null; duration_last_known_minutes?: number | null;
 }
 export type PublicationPlatform = 'es' | 'patreon';
 export function isPublished(work: Work, platform: PublicationPlatform) { return work[`${platform}_published`] ?? work.status === 'published'; }

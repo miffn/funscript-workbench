@@ -5,7 +5,7 @@ from urllib.parse import urlsplit
 
 from .store import Store
 
-CATEGORIES = ("author", "video_type", "axis_type", "release_type", "tier", "custom")
+CATEGORIES = ("author", "video_type", "axis_type", "release_type", "tier", "duration", "custom")
 SINGLE_CATEGORIES = set(CATEGORIES) - {"custom"}
 RELEASE_NAMES = {"free sample": "Free Sample", "paid": "Paid"}
 TIER_NAMES = {"free": "Free", "main tier": "Main Tier", "extra tier": "Extra Tier"}
@@ -155,6 +155,8 @@ class TagService:
 
     def create(self, changes: dict) -> dict:
         category = changes["category"]
+        if category == 'duration':
+            raise TagError('时间标签由源视频自动计算，不能手动创建')
         name = validate_name(category, changes["name"])
         status, url = support_fields(category, changes)
         with self.store.connection() as db:
@@ -173,6 +175,8 @@ class TagService:
             if row is None:
                 raise TagError("标签不存在", 404)
             current = dict(row)
+            if current['category'] == 'duration':
+                raise TagError('时间标签由源视频自动计算，不能手动修改')
             if changes["expected_revision"] != current["revision"]:
                 raise TagError("标签已被其他客户端修改，请刷新后重试", 409)
             name = validate_name(current["category"], changes.get("name", current["name"]))
@@ -206,8 +210,14 @@ class TagService:
             if expected_revision != state["tags_revision"]:
                 raise TagError("库存标签已被其他客户端修改，请刷新后重试", 409)
             selected = [self.tag(db, tag_id) for tag_id in tag_ids]
+            automatic = {tag['id']: tag for tag in state['tags'] if tag['category'] == 'duration'}
+            if any(tag['category'] == 'duration' and tag['id'] not in automatic for tag in selected):
+                raise TagError('不能手动绑定时间标签，请扫描或重新匹配文件')
+            # Editors may omit read-only tags; preserve the calculated association.
+            selected = [tag for tag in selected if tag['category'] != 'duration']
             validate_selection(selected)
-            db.execute("DELETE FROM work_tags WHERE work_id=?", (work_id,))
+            tag_ids = [tag['id'] for tag in selected]
+            db.execute("DELETE FROM work_tags WHERE work_id=? AND tag_id IN (SELECT id FROM tags WHERE category!='duration')", (work_id,))
             db.executemany("INSERT INTO work_tags(work_id,tag_id,source) VALUES(?,?,'manual')", [(work_id, tag_id) for tag_id in tag_ids])
             db.execute("INSERT INTO work_tag_state(work_id,revision,manual_edited) VALUES(?,?,1) ON CONFLICT(work_id) DO UPDATE SET revision=excluded.revision,manual_edited=1", (work_id, state["tags_revision"] + 1))
             return self.work_state(db, work_id)

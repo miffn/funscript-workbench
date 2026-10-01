@@ -19,6 +19,7 @@ from .scanner import enrich_metadata
 from .previews import MEDIA_FILES, PreviewError
 from .store import Store, now
 from .tags import TagService, TagError
+from .durations import duration_fields
 from .scan_roots import ScanRoots, ScanRootsError
 from .work_links import WorkLinks, WorkLinksError
 from .release_dates import RELEASE_DATE_FIELDS, validate_release_date
@@ -85,7 +86,7 @@ class ScanRootsEdit(BaseModel):
 
 class TagCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    category: Literal["author", "video_type", "axis_type", "release_type", "tier", "custom"]
+    category: Literal["author", "video_type", "axis_type", "release_type", "tier", "duration", "custom"]
     name: str = Field(strict=True, min_length=1, max_length=120)
     support_url: str | None = Field(default=None, strict=True, max_length=2000)
     support_status: Literal["unknown", "none", "url"] | None = None
@@ -175,6 +176,7 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
         tag_state = tags.work_state(db, record["id"])
         record["tags"] = tag_state["tags"]
         record["tags_revision"] = tag_state["tags_revision"]
+        record.update(duration_fields(db, record['id']))
         selected_type = next((tag["name"] for tag in record["tags"] if tag["category"] == "video_type"), None)
         manual_tags = db.execute("SELECT manual_edited FROM work_tag_state WHERE work_id=?", (record["id"],)).fetchone()
         record["video_type"] = selected_type if selected_type is not None else "" if manual_tags and manual_tags[0] else metadata.get("video_type") or metadata.get("Video Type") or ""
@@ -290,7 +292,7 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
         if untagged_only == "true":
             if tag_id is not None:
                 raise HTTPException(422, "按标签筛选不能同时只看无标签库存")
-            clauses.append("NOT EXISTS(SELECT 1 FROM work_tags wt JOIN tags t ON t.id=wt.tag_id WHERE wt.work_id=works.id AND (t.category!='axis_type' OR wt.source!='scan'))")
+            clauses.append("NOT EXISTS(SELECT 1 FROM work_tags wt JOIN tags t ON t.id=wt.tag_id WHERE wt.work_id=works.id AND t.category!='duration' AND (t.category!='axis_type' OR wt.source!='scan'))")
         where = " WHERE " + " AND ".join(clauses) if clauses else ""
         with store.connection() as db:
             if tag_id is not None and not db.execute("SELECT 1 FROM tags WHERE id=?", (tag_id,)).fetchone():

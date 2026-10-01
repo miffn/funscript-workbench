@@ -237,10 +237,12 @@ def test_cover_failure_cached_and_input_changes_retry(inventory, monkeypatch):
     assert len(calls) == 2
     (folder / "main.mp4").write_bytes(b"different-size-video")
     scanner.scan()
+    # Manual scanning now also performs one independent source-duration probe.
+    assert len(calls) == 3
     assert generator.generate(work["id"]) == "failed"
-    assert len(calls) == 4
+    assert len(calls) == 5
     assert generator.generate(work["id"], force=True) == "failed"
-    assert len(calls) == 6
+    assert len(calls) == 7
     with store.connection() as db:
         assert db.execute("SELECT count(*) FROM issues WHERE type='cover_failed'").fetchone()[0] == 1
 

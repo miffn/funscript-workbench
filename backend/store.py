@@ -4,6 +4,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+import re
 import sqlite3
 
 
@@ -54,7 +55,7 @@ CREATE TABLE IF NOT EXISTS history (
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS tags (
  id INTEGER PRIMARY KEY,
- category TEXT NOT NULL CHECK(category IN ('author','video_type','axis_type','release_type','tier','custom')),
+ category TEXT NOT NULL CHECK(category IN ('author','video_type','axis_type','release_type','tier','duration','custom')),
  name TEXT NOT NULL, name_key TEXT NOT NULL,
  support_url TEXT,
  support_status TEXT NOT NULL DEFAULT 'unknown' CHECK(support_status IN ('unknown','none','url')),
@@ -90,6 +91,17 @@ CREATE TABLE IF NOT EXISTS work_links (
  overrides TEXT NOT NULL DEFAULT '{}',
  revision INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS video_duration_cache (
+ path TEXT PRIMARY KEY, size INTEGER NOT NULL, mtime_ns INTEGER NOT NULL,
+ seconds TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS work_durations (
+ work_id INTEGER PRIMARY KEY REFERENCES works(id),
+ total_seconds REAL, duration_minutes INTEGER,
+ status TEXT NOT NULL DEFAULT 'unknown' CHECK(status IN ('ready','unknown','partial','stale')),
+ last_good_seconds REAL, last_good_minutes INTEGER,
+ error TEXT, updated_at TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_assets_directory ON assets(directory_id);
 CREATE INDEX IF NOT EXISTS idx_directories_work ON directories(work_id);
 CREATE INDEX IF NOT EXISTS idx_issues_work ON issues(work_id);
@@ -104,12 +116,22 @@ class Store:
         with self.connection() as db:
             db.executescript(SCHEMA)
             tag_schema = db.execute("SELECT sql FROM sqlite_master WHERE name='tags'").fetchone()[0]
-            if "'axis_type'" not in tag_schema:
+            if any(f"'{category}'" not in tag_schema for category in ('axis_type', 'duration')):
                 # Rebuild only the category constraint; preserve IDs, bindings and revisions.
                 db.execute("PRAGMA foreign_keys=OFF")
                 db.execute("BEGIN IMMEDIATE")
                 try:
-                    db.execute(tag_schema.replace("CREATE TABLE tags", "CREATE TABLE tags_expanded", 1).replace("'video_type'", "'video_type','axis_type'", 1))
+                    # SQLite quotes table names after ALTER TABLE ... RENAME;
+                    # upgrades must recognize that existing canonical spelling too.
+                    expanded, replacements = re.subn(
+                        r'\bCREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:"tags"|`tags`|\[tags\]|tags)\s*\(',
+                        'CREATE TABLE tags_expanded (', tag_schema, count=1, flags=re.I)
+                    if replacements != 1:
+                        raise RuntimeError('无法识别现有标签表结构，已保留原数据')
+                    for category in ('axis_type', 'duration'):
+                        if f"'{category}'" not in expanded:
+                            expanded = expanded.replace("'video_type'", f"'video_type','{category}'", 1)
+                    db.execute(expanded)
                     db.execute("INSERT INTO tags_expanded SELECT * FROM tags")
                     db.execute("DROP TABLE tags")
                     db.execute("ALTER TABLE tags_expanded RENAME TO tags")

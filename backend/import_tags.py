@@ -220,8 +220,10 @@ def import_tags(data_dir: Path, monthly: object, master: object, dry_run=False) 
         for plan in report["plans"]:
             if plan["action"] != "bind":
                 continue
-            db.execute("DELETE FROM work_tags WHERE work_id=?", (plan["work_id"],))
+            db.execute("DELETE FROM work_tags WHERE work_id=? AND tag_id IN (SELECT id FROM tags WHERE category!='duration')", (plan["work_id"],))
             for key in plan["after_tags"]:
+                if db.execute("SELECT id FROM tags WHERE id=? AND category='duration'", (keys[key],)).fetchone():
+                    continue
                 provenance = next((value["provenance"] for value in plan["fields"].values() if value["key"] == key), [])
                 db.execute("INSERT INTO work_tags(work_id,tag_id,source,provenance) VALUES(?,?,'import',?)", (plan["work_id"], keys[key], json.dumps(provenance, ensure_ascii=False)))
             db.execute("INSERT INTO work_tag_state(work_id,revision,manual_edited) VALUES(?,?,0) ON CONFLICT(work_id) DO UPDATE SET revision=excluded.revision", (plan["work_id"], plan["tags_revision"] + 1))

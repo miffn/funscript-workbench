@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import App from './App';
-import { TagsPage, WorkTagEditor } from './Tags';
+import { TagChips, TagsPage, WorkTagEditor } from './Tags';
 import { WorkDetail } from './components';
 import type { Tag, Work, WorkTags } from './api';
 
@@ -29,7 +29,7 @@ beforeEach(() => {
       if (init?.method === 'PUT') {
         if (failStatus) return Promise.resolve(response({ detail: '版本有冲突' }, failStatus));
         const body = JSON.parse(init.body as string);
-        binding = { ...binding, tags: catalog.filter(tag => body.tag_ids.includes(tag.id)), tags_revision: binding.tags_revision + 1 };
+        binding = { ...binding, tags: [...catalog.filter(tag => body.tag_ids.includes(tag.id) && tag.category !== 'duration'), ...binding.tags.filter(tag => tag.category === 'duration')], tags_revision: binding.tags_revision + 1 };
       }
       return Promise.resolve(response(binding));
     }
@@ -48,17 +48,18 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 describe('quick tagging without media', () => {
   it.each(['gallery', 'list', 'tags'])('shows categorized labels in %s mode and exposes every filter category', async (view) => {
     const axis = makeTag(11, 'axis_type', '多轴');
-    catalog.push(axis);
-    binding.tags = [catalog[0], catalog[2], axis, catalog[4], catalog[6], catalog[8]];
+    const duration = makeTag(12, 'duration', '18 分钟');
+    catalog.push(axis, duration);
+    binding.tags = [catalog[0], catalog[2], axis, catalog[4], catalog[6], duration, catalog[8]];
     localStorage.setItem('workbench-view', view);
     render(<App />);
     const row = (await screen.findByRole('button', { name: view === 'tags' ? '编辑标签 S025_001' : '查看 S025_001 作品标题' })).closest('article')!;
-    for (const [category, name] of [['author', '作者 A'], ['video_type', 'Real'], ['axis_type', '多轴'], ['release_type', 'Paid'], ['tier', 'Main Tier'], ['custom', '短片']]) {
+    for (const [category, name] of [['author', '作者 A'], ['video_type', 'Real'], ['axis_type', '多轴'], ['release_type', 'Paid'], ['tier', 'Main Tier'], ['duration', '18 分钟'], ['custom', '短片']]) {
       expect(row.querySelector(`.tag-chip.${category}`)?.textContent).toContain(name);
     }
     const select = screen.getByLabelText('按标签筛选');
-    for (const label of ['作者', '视频类型', '轴类型', '发布类型', '档位', '自定义分类']) expect(within(select).getByRole('group', { name: label })).toBeTruthy();
-    for (const id of [3, 11, 5, 7, 9]) {
+    for (const label of ['作者', '视频类型', '轴类型', '发布类型', '档位', '时间', '自定义分类']) expect(within(select).getByRole('group', { name: label })).toBeTruthy();
+    for (const id of [3, 11, 5, 7, 12, 9]) {
       fireEvent.change(select, { target: { value: String(id) } });
       await waitFor(() => expect(fetchMock.mock.calls.some(([url]) => new URL(url, 'http://localhost').searchParams.get('tag_id') === String(id))).toBe(true));
     }
@@ -182,5 +183,65 @@ describe('shared author tag management', () => {
     await waitFor(() => expect(changed).toHaveBeenCalledOnce());
     const [, init] = fetchMock.mock.calls.find(([, init]) => init?.method === 'POST')!;
     expect(JSON.parse(init.body)).toEqual({ category: 'author', name: '新作者', support_status: 'none', support_url: null });
+  });
+});
+
+describe('automatic duration tags', () => {
+  it('shows the current duration read-only and excludes it from manual binding requests', async () => {
+    const duration = makeTag(12, 'duration', '18 分钟'); catalog.push(duration); binding.tags = [duration];
+    const onSaved = vi.fn();
+    render(<WorkTagEditor work={{ ...work, duration_status: 'ready' }} onClose={vi.fn()} onSaved={onSaved} />);
+    await screen.findByRole('button', { name: '作者 A' });
+    expect(screen.getByTitle('时间：18 分钟（自动读取）')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '18 分钟' })).toBeNull();
+    expect((screen.getByRole('button', { name: '保存标签' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: '作者 A' }));
+    fireEvent.click(screen.getByRole('button', { name: '保存标签' }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalledOnce());
+    const [, init] = fetchMock.mock.calls.find(([, options]) => options?.method === 'PUT')!;
+    expect(JSON.parse(init.body)).toEqual({ tag_ids: [1], expected_revision: 2 });
+    expect(binding.tags.map(tag => tag.id)).toEqual([1, 12]);
+  });
+
+  it('clears manual labels without deleting the automatic duration binding', async () => {
+    const duration = makeTag(12, 'duration', '18 分钟'); catalog.push(duration); binding.tags = [catalog[0], duration];
+    render(<WorkTagEditor work={work} onClose={vi.fn()} onSaved={vi.fn()} />);
+    await screen.findByRole('button', { name: '作者 A' });
+    fireEvent.click(screen.getByRole('button', { name: '作者 A' }));
+    fireEvent.click(screen.getByRole('button', { name: '保存标签' }));
+    await waitFor(() => expect(binding.tags_revision).toBe(3));
+    const [, init] = fetchMock.mock.calls.find(([, options]) => options?.method === 'PUT')!;
+    expect(JSON.parse(init.body).tag_ids).toEqual([]);
+    expect(binding.tags.map(tag => tag.id)).toEqual([12]);
+  });
+
+  it('makes duration catalog entries read-only and excludes duration from creation choices', async () => {
+    catalog.push(makeTag(12, 'duration', '18 分钟'));
+    render(<TagsPage revision={0} onChanged={vi.fn()} />);
+    await screen.findByRole('button', { name: '编辑标签 作者 A' });
+    const row = screen.getByRole('heading', { name: '18 分钟时间' }).closest('article')!;
+    expect(within(row).queryByRole('button')).toBeNull();
+    expect(within(row).getByText('自动更新 · 只读')).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('标签类别'), { target: { value: 'duration' } });
+    expect(screen.queryByRole('button', { name: '创建标签' })).toBeNull();
+    fireEvent.change(screen.getByLabelText('搜索标签资料'), { target: { value: '18' } });
+    expect(screen.getByRole('heading', { name: '18 分钟时间' })).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('标签类别'), { target: { value: 'all' } });
+    fireEvent.click(screen.getByRole('button', { name: '创建标签' }));
+    const categorySelect = screen.getByLabelText('类别');
+    expect(within(categorySelect).queryByRole('option', { name: '时间' })).toBeNull();
+  });
+
+  it.each([['unknown', '待读取'], ['partial', '读取不完整'], ['stale', '待更新']])('represents %s duration without inventing zero minutes', (status, text) => {
+    render(<TagChips tags={[]} durationStatus={status} durationError="源视频时长暂不可读取" />);
+    expect(screen.getByText(text)).toBeTruthy();
+    expect(screen.getByTitle('源视频时长暂不可读取')).toBeTruthy();
+    expect(document.body.textContent).not.toContain('0 分钟');
+  });
+
+  it('displays zero minutes when it is an actual measured duration tag', () => {
+    render(<TagChips tags={[makeTag(12, 'duration', '0 分钟')]} durationStatus="ready" />);
+    expect(screen.getByTitle('时间：0 分钟（自动读取）')).toBeTruthy();
+    expect(screen.queryByText('待读取')).toBeNull();
   });
 });
