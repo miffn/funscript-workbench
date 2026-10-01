@@ -124,7 +124,9 @@ class Scanner:
                            (json.dumps({"at": now(), "sources": sources, "records": len(records)}, ensure_ascii=False),))
 
     def scan(self, roots: tuple[Root, ...] | None = None, target_id: str | None = None) -> dict:
-        roots = self.config.roots if roots is None else roots
+        if roots is None:
+            from .scan_roots import ScanRoots
+            roots = ScanRoots(self.store, self.config).roots()
         if target_id is None:
             self.import_history()
         observed: list[dict] = []
@@ -134,11 +136,13 @@ class Scanner:
         unnumbered_count = 0
         for root in roots:
             try:
+                from .scan_roots import no_link_components, ScanRootsError
+                no_link_components(root.path)
                 children = sorted(root.path.iterdir(), key=lambda item: item.name.lower())
                 # Listing must succeed before any existing directories may be marked absent.
-            except OSError as error:
+            except (OSError, ScanRootsError) as error:
                 unavailable.append(str(root.path))
-                scan_issues.append(("root_unavailable", f"库存根目录暂时不可访问：{error.strerror or error}", None, None, [root.windows_path]))
+                scan_issues.append(("root_unavailable", f"库存根目录暂时不可访问：{getattr(error, 'strerror', None) or error}", None, None, [root.windows_path]))
                 continue
             reachable.append(str(root.path))
             unnumbered = []

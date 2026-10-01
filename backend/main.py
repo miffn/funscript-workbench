@@ -11,7 +11,7 @@ from typing import Annotated, Literal
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .config import Config
 from .jobs import JobWorker
@@ -53,10 +53,24 @@ class PreviewMatchingEdit(BaseModel):
     expected_revision: int = Field(ge=0, strict=True)
 
 
+class ScanRootDefinition(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    path: str = Field(strict=True, min_length=1, max_length=2000)
+    label: str = Field(default='', strict=True, max_length=120)
+    enabled: bool = Field(strict=True)
+
+
 class ScanRootsEdit(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    enabled_paths: list[Annotated[str, Field(strict=True, min_length=1)]]
+    enabled_paths: list[Annotated[str, Field(strict=True, min_length=1)]] | None = None
+    roots: list[ScanRootDefinition] | None = Field(default=None, max_length=100)
     expected_revision: int = Field(strict=True, ge=0)
+
+    @model_validator(mode='after')
+    def exactly_one_mode(self):
+        if len(self.model_fields_set & {'roots', 'enabled_paths'}) != 1 or (self.roots is None and self.enabled_paths is None):
+            raise ValueError('必须且只能指定 roots 或 enabled_paths')
+        return self
 
 
 class TagCreate(BaseModel):
@@ -93,6 +107,8 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
     worker = JobWorker(store, config)
     tags = TagService(store)
     scan_roots = ScanRoots(store, config)
+    with store.connection() as db:
+        scan_roots.state(db)
     links = WorkLinks(store)
 
     @asynccontextmanager
@@ -141,15 +157,16 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
         record["video_type"] = selected_type if selected_type is not None else "" if manual_tags and manual_tags[0] else metadata.get("video_type") or metadata.get("Video Type") or ""
         record["axis_type"] = next((tag["name"] for tag in record["tags"] if tag["category"] == "axis_type"), "")
         latest = last_scan(db) or {}
+        registered_roots = {str(root.path) for root in scan_roots.roots(db)}
         unavailable_roots = latest.get("unavailable_roots", [])
         directories = [dict(row) for row in db.execute("SELECT * FROM directories WHERE work_id=? ORDER BY available DESC,id", (record["id"],))]
         for directory in directories:
-            directory["available"] = bool(directory["available"]) and directory["root_path"] not in unavailable_roots
+            directory["available"] = bool(directory["available"]) and directory["root_path"] not in unavailable_roots and directory['root_path'] in registered_roots
         record["directories"] = directories
         assets = [dict(row) for row in db.execute("SELECT a.* FROM assets a JOIN directories d ON d.id=a.directory_id WHERE d.work_id=? ORDER BY a.kind,a.relative_path COLLATE NOCASE", (record["id"],))]
         active_ids = {directory["id"] for directory in directories if directory["available"]}
         # Unreachable root keeps prior inventory counts; vanished directory is historical only.
-        counted_ids = active_ids | {directory["id"] for directory in directories if directory["root_path"] in unavailable_roots}
+        counted_ids = active_ids | {directory["id"] for directory in directories if directory["root_path"] in unavailable_roots or directory['root_path'] not in registered_roots}
         record["video_count"] = sum(asset["kind"] == "video" and asset["directory_id"] in counted_ids for asset in assets)
         record["script_count"] = sum(asset["kind"] == "script" and asset["directory_id"] in counted_ids for asset in assets)
         record["issues"] = [{"type": row["type"], "message": row["message"]} for row in db.execute("SELECT type,message FROM issues WHERE work_id=? ORDER BY id", (record["id"],))]
@@ -183,10 +200,11 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
         if origin not in {"http://localhost:8788", "http://127.0.0.1:8788"} or urlparse(origin).netloc.lower() != request.headers.get("host", "").lower():
             raise HTTPException(403, "目录打开仅允许素材主机网页的同源请求")
 
-    def send_open_request(windows_path: str):
+    def send_open_request(windows_path: str, windows_root: str):
         if config.open_mode == "gateway":
             encoded = base64.urlsafe_b64encode(windows_path.encode("utf-8")).decode("ascii")
-            return JSONResponse({"message": "已发送打开请求"}, headers={"X-Workbench-Open-Folder": encoded})
+            encoded_root = base64.urlsafe_b64encode(windows_root.encode("utf-8")).decode("ascii")
+            return JSONResponse({"message": "已发送打开请求"}, headers={"X-Workbench-Open-Folder": encoded, "X-Workbench-Folder-Root": encoded_root})
         try:
             subprocess.Popen(["/mnt/c/Windows/explorer.exe", windows_path], shell=False,
                              stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -194,15 +212,17 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
             raise HTTPException(502, f"无法发送资源管理器打开请求：{error.strerror or error}")
         return {"message": "已发送打开请求"}
 
-    def validated_directory(directory: dict) -> str:
+    def validated_directory(directory: dict, db) -> tuple[str, str]:
         if not directory["available"]:
             raise HTTPException(404, "目录不存在或当前不可访问")
         path = Path(directory["path"])
-        root = next((root for root in config.roots if str(root.path) == directory["root_path"]), None)
+        root = next((root for root in scan_roots.roots(db) if str(root.path) == directory["root_path"]), None)
         if not root:
             raise HTTPException(403, "目录不在配置的库存根目录中")
         try:
             relative = path.resolve().relative_to(root.path.resolve())
+            from .scan_roots import no_link_components
+            no_link_components(root.path)
             if not relative.parts or path.is_symlink() or not path.is_dir():
                 raise HTTPException(404, "目录不存在或当前不可访问")
             expected_windows = root.windows_directory(path)
@@ -214,9 +234,9 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
                 candidate = candidate / part
                 if candidate.is_symlink():
                     raise HTTPException(403, "不允许打开符号链接目录")
-        except (OSError, ValueError):
+        except (OSError, ValueError, ScanRootsError):
             raise HTTPException(403, "目录不在配置的库存根目录中")
-        return expected_windows
+        return expected_windows, root.windows_path
 
     @app.get("/api/health")
     def health():
@@ -364,8 +384,7 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
         with store.connection() as db:
             imported = db.execute("SELECT value FROM settings WHERE key='history_imported'").fetchone()
             selection = scan_roots.state(db)
-        return {"roots": [{"path": str(root.path), "windows_path": root.windows_path, "label": root.label,
-                            "available": root.path.is_dir(), "enabled": str(root.path) in selection["enabled_paths"]} for root in config.roots],
+        return {"roots": [{**root, "available": Path(root['path']).is_dir()} for root in selection['roots']],
                 "scan_roots_revision": selection["revision"],
                 "scan_mode": "manual", "scan_interval_seconds": 0,
                 "database": "SQLite", "history_import": json.loads(imported[0]) if imported else None,
@@ -374,7 +393,10 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
     @app.put("/api/settings/scan-roots")
     def update_scan_roots(options: ScanRootsEdit):
         try:
-            scan_roots.update(options.enabled_paths, options.expected_revision)
+            if options.roots is not None:
+                scan_roots.replace([root.model_dump() for root in options.roots], options.expected_revision)
+            else:
+                scan_roots.update(options.enabled_paths, options.expected_revision)
         except ScanRootsError as error:
             raise HTTPException(error.status_code, str(error))
         return settings()
@@ -398,8 +420,8 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
                 raise HTTPException(404, "目录不存在或当前不可访问")
             if len(rows) > 1:
                 raise HTTPException(409, "编号有多个关联目录，请先选择具体路径")
-            windows_path = validated_directory(dict(rows[0]))
-        return send_open_request(windows_path)
+            windows_path, windows_root = validated_directory(dict(rows[0]), db)
+        return send_open_request(windows_path, windows_root)
 
     @app.get("/api/works/{work_id}/preview")
     def preview_state(work_id: int):
@@ -465,15 +487,13 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
             output = worker.previews.output_directory(work["script_id"])
             if not output.is_dir():
                 raise PreviewError("预览输出目录尚不存在，请先生成预览", 404)
-            configured_root = next((root for root in config.roots if output.resolve().is_relative_to(root.path.resolve())), None)
-            if not configured_root:
-                raise PreviewError("预览目录无法映射到素材主机的库存根目录", 403)
-            windows_path = configured_root.windows_directory(output)
+            windows_root = worker.previews.windows_path(config.preview_output_root)
+            windows_path = str(PureWindowsPath(windows_root) / output.name)
             if not PureWindowsPath(windows_path).is_absolute():
                 raise PreviewError("预览目录的 Windows 路径映射无效", 403)
         except PreviewError as error:
             raise HTTPException(error.status_code, str(error))
-        return send_open_request(windows_path)
+        return send_open_request(windows_path, windows_root)
 
     @app.get("/api/covers/{work_id}")
     def cover_file(work_id: int):

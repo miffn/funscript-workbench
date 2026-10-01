@@ -14,21 +14,47 @@ import threading
 
 HOP_HEADERS = {"connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
                "te", "trailer", "transfer-encoding", "upgrade", "x-workbench-host-key",
-               "x-workbench-open-folder"}
+               "x-workbench-open-folder", "x-workbench-folder-root"}
 MAX_BODY = 1024 * 1024
-FOLDER_ROOTS = (r"D:\Media\2026", r"D:\Media\workspace")
 
 
-def launch_folder(encoded_path):
-    path = base64.urlsafe_b64decode(encoded_path).decode("utf-8")
-    if "\x00" in path or not ntpath.isabs(path):
+def decode_folder_path(encoded):
+    if not isinstance(encoded, str) or not encoded:
+        raise ValueError("Missing folder authorization")
+    path = base64.b64decode(encoded + "=" * (-len(encoded) % 4),
+                            altchars=b"-_", validate=True).decode("utf-8")
+    path = path.replace("/", "\\")
+    if any(ord(char) < 32 for char in path) or path.startswith(("\\\\?\\", "\\\\.\\")):
         raise ValueError("Invalid folder path")
-    normalized = ntpath.normcase(ntpath.normpath(path))
-    roots = [ntpath.normcase(root) for root in FOLDER_ROOTS]
-    if not any(ntpath.commonpath([root, normalized]) == root for root in roots):
-        raise ValueError("Folder is outside inventory roots")
-    if not Path(path).is_dir():
+    drive, tail = ntpath.splitdrive(path)
+    drive_absolute = bool(re.fullmatch(r"[A-Za-z]:", drive)) and tail.startswith("\\")
+    share_parts = drive[2:].split("\\") if drive.startswith("\\\\") else []
+    unc_absolute = (len(share_parts) == 2 and all(part and part not in {".", ".."} for part in share_parts)
+                    and (not tail or tail.startswith("\\")))
+    if not (drive_absolute or unc_absolute) or any(char in path for char in '*?"<>|'):
+        raise ValueError("Invalid folder path")
+    return ntpath.normpath(path)
+
+
+def inside_folder_root(path, root):
+    normalized, normalized_root = ntpath.normcase(path), ntpath.normcase(root)
+    try:
+        return ntpath.commonpath([normalized_root, normalized]) == normalized_root
+    except ValueError:
+        return False
+
+
+def launch_folder(encoded_path, encoded_root=None):
+    # Authorization comes only from the fixed local backend, never client headers.
+    path, root = decode_folder_path(encoded_path), decode_folder_path(encoded_root)
+    if not inside_folder_root(path, root):
+        raise ValueError("Folder is outside the authorized root")
+    folder, root_folder = Path(path), Path(root)
+    if not folder.is_dir() or not root_folder.is_dir():
         raise ValueError("Folder is no longer available")
+    resolved, resolved_root = str(folder.resolve(strict=True)), str(root_folder.resolve(strict=True))
+    if not inside_folder_root(ntpath.normpath(resolved), ntpath.normpath(resolved_root)):
+        raise ValueError("Folder resolves outside the authorized root")
     subprocess.Popen([r"C:\Windows\explorer.exe", path], shell=False)
 
 
@@ -81,9 +107,10 @@ class GatewayHandler(BaseHTTPRequestHandler):
             response = upstream.getresponse()
             payload = response.read()
             folder = response.getheader("X-Workbench-Open-Folder")
+            folder_root = response.getheader("X-Workbench-Folder-Root")
             if folder and self.server.host_key and self.command == "POST" and response.status == 200 and re.fullmatch(r"/api/works/\d+/(?:preview/)?open-folder", self.path):
                 try:
-                    launch_folder(folder)
+                    launch_folder(folder, folder_root)
                 except (OSError, ValueError):
                     return self.fail(502, "打开文件夹失败，请检查目录是否仍存在")
             self.send_response(response.status, response.reason)

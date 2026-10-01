@@ -5,7 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 import hashlib
 import json
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 import shutil
 import subprocess
 import threading
@@ -396,7 +396,7 @@ def test_media_and_manifest_path_permissions(previews, fault, tmp_path):
         assert client.get(f"/api/works/{work['id']}/preview/files/secret.txt").status_code == 404
 
 
-def test_preview_open_folder_requires_host_origin_and_configured_mapping(previews, tmp_path):
+def test_preview_open_folder_requires_host_origin_and_authorized_output_mapping(previews, tmp_path):
     config, store, scanner = previews
     source(config.roots[0].path)
     scanner.scan()
@@ -417,7 +417,12 @@ def test_preview_open_folder_requires_host_origin_and_configured_mapping(preview
     unmapped = replace(config, preview_output_root=tmp_path / "unmapped")
     make_manifest(unmapped.preview_output_root / "S070")
     with TestClient(create_app(unmapped, start_worker=False)) as client:
-        assert client.post(endpoint, headers=headers).status_code == 403
+        response = client.post(endpoint, headers=headers)
+        assert response.status_code == 200
+        root = base64.urlsafe_b64decode(response.headers['X-Workbench-Folder-Root']).decode()
+        output = base64.urlsafe_b64decode(response.headers['X-Workbench-Open-Folder']).decode()
+        assert PureWindowsPath(output) == PureWindowsPath(root) / 'S070'
+        assert PureWindowsPath(root).is_absolute()
 
 
 def test_only_owned_dead_pid_lock_is_recovered(previews, monkeypatch):

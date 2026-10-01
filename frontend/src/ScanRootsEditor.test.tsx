@@ -19,9 +19,9 @@ beforeEach(() => {
   server = structuredClone(initial); failStatus = 0;
   fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
     if (url === '/api/settings/scan-roots') {
-      if (failStatus) return Promise.resolve(response({ detail: '服务暂不可用' }, failStatus));
+      if (failStatus) return Promise.resolve(response({ detail: failStatus === 409 ? '扫描目录版本已被其他客户端修改' : '服务暂不可用' }, failStatus));
       const body = JSON.parse(init!.body as string);
-      server = { ...server, scan_roots_revision: server.scan_roots_revision! + 1, roots: server.roots.map(root => typeof root === 'string' ? root : { ...root, enabled: body.enabled_paths.includes(root.path) }) };
+      server = { ...server, scan_roots_revision: server.scan_roots_revision! + 1, roots: body.roots.map((root: Record<string, unknown>) => ({ ...root, windows_path: root.path, available: true })) };
     }
     return Promise.resolve(response(server));
   });
@@ -30,6 +30,43 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe('persisted scan directory selection', () => {
+  it('adds and deletes directory configuration, then reads the saved catalog on a fresh mount', async () => {
+    const view = render(<ScanRootsEditor settings={initial} />);
+    fireEvent.change(screen.getByLabelText('目录路径'), { target: { value: 'E:\\素材' } });
+    fireEvent.change(screen.getByLabelText('名称（可选）'), { target: { value: '新库存' } });
+    fireEvent.click(screen.getByRole('button', { name: '添加目录' }));
+    fireEvent.click(screen.getByRole('button', { name: '删除目录 2026' }));
+    expect(checkbox('新库存').checked).toBe(true); expect(screen.queryByRole('checkbox', { name: '扫描 2026' })).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+    fireEvent.click(saveButton()); await screen.findByText(/扫描目录已保存/);
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).roots).toEqual([{ path: workspace, label: 'workspace', enabled: true }, { path: 'E:\\素材', label: '新库存', enabled: true }]);
+    view.unmount(); render(<ScanRootsEditor settings={server} />);
+    expect(checkbox('新库存').checked).toBe(true); expect(screen.queryByRole('checkbox', { name: '扫描 2026' })).toBeNull();
+    expect(fetchMock.mock.calls.some(([url]) => url.includes('/scans'))).toBe(false);
+  });
+
+  it('can delete every directory and save an empty catalog', async () => {
+    render(<ScanRootsEditor settings={initial} />);
+    fireEvent.click(screen.getByRole('button', { name: '删除目录 2026' })); fireEvent.click(screen.getByRole('button', { name: '删除目录 workspace' }));
+    fireEvent.click(saveButton()); await screen.findByText(/扫描目录已保存/);
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ roots: [], expected_revision: 3 });
+    expect(screen.getByText('尚未配置扫描目录，请添加素材所在的目录。')).toBeTruthy();
+  });
+
+  it('rejects relative paths and duplicates before changing the draft', () => {
+    render(<ScanRootsEditor settings={initial} />);
+    fireEvent.change(screen.getByLabelText('目录路径'), { target: { value: 'folder' } }); fireEvent.click(screen.getByRole('button', { name: '添加目录' }));
+    expect(screen.getByText(/请输入 Windows 盘符绝对路径/)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('目录路径'), { target: { value: 'd:\\Media\\2026\\' } }); fireEvent.click(screen.getByRole('button', { name: '添加目录' }));
+    expect(screen.getByText('该目录已在列表中。')).toBeTruthy(); expect(saveButton().disabled).toBe(true); expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('preserves the directory draft and allows retry when active tasks temporarily prevent saving', async () => {
+    fetchMock.mockResolvedValueOnce(response({ detail: '有任务正在运行，请稍后重试' }, 409));
+    render(<ScanRootsEditor settings={initial} />); fireEvent.click(screen.getByRole('button', { name: '删除目录 2026' })); fireEvent.click(saveButton());
+    await screen.findByText('扫描目录未保存：有任务正在运行，请稍后重试');
+    expect(saveButton().disabled).toBe(false); fireEvent.click(saveButton()); await screen.findByText(/扫描目录已保存/);
+  });
   it('uses server enabled flags and does not save or scan until the save button is clicked', () => {
     const settings = { ...initial, roots: [initial.roots[0], { ...(initial.roots[1] as Record<string, unknown>), enabled: false }] };
     render(<ScanRootsEditor settings={settings} />);
@@ -49,7 +86,7 @@ describe('persisted scan directory selection', () => {
     expect(fetchMock).toHaveBeenCalledOnce();
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe('/api/settings/scan-roots'); expect(init.method).toBe('PUT');
-    expect(JSON.parse(init.body)).toEqual({ enabled_paths: [year], expected_revision: 3 });
+    expect(JSON.parse(init.body)).toEqual({ roots: [{ path: year, label: '2026', enabled: true }, { path: workspace, label: 'workspace', enabled: false }], expected_revision: 3 });
     server = { ...server, scan_roots_revision: 4, roots: [server.roots[0], { ...(server.roots[1] as Record<string, unknown>), enabled: false }] };
     await act(async () => { finish!(response(server)); });
     expect(screen.getByText(/扫描目录已保存；尚未执行扫描/)).toBeTruthy();
@@ -78,11 +115,11 @@ describe('persisted scan directory selection', () => {
     expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(false);
   });
 
-  it('requires at least one directory and prevents sending an empty selection', () => {
+  it('allows disabling every directory and persists the choice', async () => {
     render(<ScanRootsEditor settings={initial} />); fireEvent.click(checkbox('workspace')); fireEvent.click(checkbox('2026'));
-    expect(screen.getByText('至少保留一个扫描目录。')).toBeTruthy();
-    expect(saveButton().disabled).toBe(true); fireEvent.click(saveButton()); expect(fetchMock).not.toHaveBeenCalled();
-    fireEvent.click(checkbox('workspace')); expect(saveButton().disabled).toBe(false);
+    expect(screen.getByText('没有启用目录，立即扫描暂不可用。')).toBeTruthy();
+    expect(saveButton().disabled).toBe(false); fireEvent.click(saveButton()); await screen.findByText(/扫描目录已保存/);
+    expect(checkbox('2026').checked).toBe(false); expect(checkbox('workspace').checked).toBe(false);
   });
 
   it('keeps a 409 draft until the user explicitly loads current settings and then saves against the latest revision', async () => {

@@ -18,6 +18,7 @@ from preview_generator.scripts import AXES, ScriptError, discover_scripts, load_
 from .config import Config, normalize_id
 from .store import Store
 from .heatmaps import generate_heatmap
+from .scan_roots import ScanRoots, windows_path as map_windows_path
 
 
 CLIP_MEDIA_FILES = {
@@ -87,18 +88,18 @@ class PreviewService:
         return output
 
     def windows_path(self, output: Path) -> str:
-        for root in self.config.roots:
+        for root in ScanRoots(self.store, self.config).roots():
             try:
                 return root.windows_directory(output)
             except ValueError:
                 continue
-        mounted = re.fullmatch(r"/mnt/([a-z])/(.+)", str(output), re.I)
-        return mounted[1].upper() + ":\\" + mounted[2].replace("/", "\\") if mounted else ""
+        mapped = map_windows_path(output)
+        return mapped if mapped != str(output) else ''
 
     def valid_source(self, asset: dict) -> Path:
         if not asset["available"]:
             raise PreviewError("视频所在目录当前不可访问", 404)
-        root = next((root for root in self.config.roots if str(root.path) == asset["root_path"]), None)
+        root = next((root for root in ScanRoots(self.store, self.config).roots() if str(root.path) == asset["root_path"]), None)
         if not root:
             raise PreviewError("视频不在配置的库存根目录中", 403)
         directory = Path(asset["path"])

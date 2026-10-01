@@ -62,6 +62,11 @@ class JobWorker:
     def enqueue_preview(self, inputs: dict) -> dict:
         with self.store.connection() as db:
             db.execute("BEGIN IMMEDIATE")
+            registered = {str(root.path) for root in ScanRoots(self.store, self.config).roots(db)}
+            source = db.execute('SELECT d.root_path,d.available FROM assets a JOIN directories d ON d.id=a.directory_id WHERE a.id=? AND d.work_id=?',
+                                (inputs['video_asset_id'], inputs['work_id'])).fetchone()
+            if not source or source['root_path'] not in registered or not source['available']:
+                raise PreviewError('素材目录已移除或不可访问，请重新匹配文件', 409)
             if db.execute("SELECT 1 FROM jobs WHERE type='rematch' AND status IN ('queued','running') AND json_extract(inputs,'$.work_id')=?", (inputs['work_id'],)).fetchone():
                 raise PreviewError('作品正在重新匹配文件，请等待完成', 409)
             row = db.execute("SELECT id,inputs FROM jobs WHERE type='preview' AND status IN ('queued','running') AND json_extract(inputs,'$.work_id')=? ORDER BY id LIMIT 1", (inputs["work_id"],)).fetchone()
@@ -188,7 +193,7 @@ class JobWorker:
             if enabled_paths is None:
                 with self.store.connection() as db:
                     enabled_paths = ScanRoots(self.store, self.config).state(db)["enabled_paths"]
-            roots = tuple(root for root in self.config.roots if str(root.path) in enabled_paths)
+            roots = tuple(root for root in ScanRoots(self.store, self.config).roots() if str(root.path) in enabled_paths)
             if not roots:
                 raise ScanRootsError("任务的扫描目录已不在当前配置中，请重新选择目录并扫描")
             result = self.scanner.scan(roots)
@@ -221,7 +226,7 @@ class JobWorker:
         with self.store.connection() as db:
             db.execute("UPDATE jobs SET status='running',started_at=?,progress=5,message='查找当前完整编号的素材目录',error=NULL WHERE id=?", (now(), job_id))
         try:
-            roots = tuple(root for root in self.config.roots if str(root.path) in inputs['enabled_paths'])
+            roots = tuple(root for root in ScanRoots(self.store, self.config).roots() if str(root.path) in inputs['enabled_paths'])
             if not roots:
                 raise PreviewError('扫描目录已不在配置中，请重新选择目录')
             result = self.scanner.scan(roots, target_id=inputs['script_id'])

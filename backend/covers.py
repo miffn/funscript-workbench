@@ -7,6 +7,7 @@ import subprocess
 
 from .config import Config
 from .store import Store, now
+from .scan_roots import ScanRoots, ScanRootsError, no_link_components
 
 
 class CoverGenerator:
@@ -18,9 +19,12 @@ class CoverGenerator:
 
     def source(self, work_id: int, root_paths: list[str] | None = None) -> Path | None:
         with self.store.connection() as db:
+            registered_roots = {str(root.path): root for root in ScanRoots(self.store, self.config).roots(db)}
             candidates = db.execute("SELECT a.*,d.path,d.root_path FROM assets a JOIN directories d ON d.id=a.directory_id WHERE d.work_id=? AND d.available=1 AND a.kind='video'", (work_id,)).fetchall()
         videos = []
         for row in candidates:
+            if row['root_path'] not in registered_roots:
+                continue
             if root_paths is not None and row["root_path"] not in root_paths:
                 continue
             relative = Path(row["relative_path"])
@@ -28,10 +32,13 @@ class CoverGenerator:
                 continue
             source = Path(row["path"]) / relative
             try:
+                no_link_components(source)
                 source.resolve().relative_to(Path(row["root_path"]).resolve())
+                if source.resolve().is_relative_to(self.config.preview_output_root.resolve()):
+                    continue
                 if source.is_symlink() or not source.is_file():
                     continue
-            except (ValueError, OSError):
+            except (ValueError, OSError, ScanRootsError):
                 continue
             videos.append((len(relative.parts), str(source).lower(), source))
         return min(videos, key=lambda item: item[:2])[2] if videos else None
@@ -54,7 +61,11 @@ class CoverGenerator:
             with self.store.connection() as db:
                 latest = db.execute("SELECT value FROM settings WHERE key='last_scan'").fetchone()
                 unavailable = json.loads(latest[0]).get("unavailable_roots", []) if latest else []
-                directories = db.execute("SELECT root_path FROM directories WHERE work_id=? AND available=1", (work_id,)).fetchall()
+                directories = db.execute("SELECT root_path,available FROM directories WHERE work_id=?", (work_id,)).fetchall()
+                registered = {str(root.path) for root in ScanRoots(self.store, self.config).roots(db)}
+                if any(directory['root_path'] not in registered for directory in directories):
+                    return 'skipped'
+                directories = [directory for directory in directories if directory['available']]
                 if root_paths is not None and any(directory[0] not in root_paths for directory in directories):
                     # An unscanned source is not evidence that its cached cover vanished.
                     return "skipped"
@@ -108,7 +119,7 @@ class CoverGenerator:
                                    and root_paths is not None and any(
                                        str(root.path) not in root_paths
                                        and Path(old["source_path"]).is_relative_to(root.path)
-                                       for root in self.config.roots))
+                                       for root in ScanRoots(self.store, self.config).roots()))
         with self.store.connection() as db:
             db.execute("DELETE FROM issues WHERE work_id=? AND type='cover_failed'", (work_id,))
             if not preserve_unselected:
