@@ -27,3 +27,16 @@
 .tag-chip{background:var(--tag-bg,var(--bg));color:var(--tag-fg,var(--muted));border-color:transparent;font-size:12px;gap:5px;align-items:baseline;white-space:normal;overflow-wrap:anywhere}.tag-chip-category{font-size:10px;white-space:nowrap;font-weight:500}.tag-color-legend{display:flex;flex-wrap:wrap;gap:6px;flex-basis:100%;align-items:center}.tag-color-legend .tag-chip{white-space:nowrap;font-size:11px;padding:2px 8px}.tag-filter select{max-width:min(360px,100%)}
 .work-info h2{min-height:0}.work-info>.tag-chips,.work-info>.tag-empty{margin-top:10px;min-height:27px}.work-card{height:100%}.work-card .work-info{display:flex;flex-direction:column;height:100%}.gallery .work-card{display:flex;flex-direction:column}.gallery .cover{flex-shrink:0;width:100%}.work-card .work-foot{margin-top:auto;padding-top:12px}.list .work-info{height:auto}.list .work-info h2{min-height:0}.list .work-info>.tag-chips{margin-top:8px}.list .work-foot{padding-top:9px}
 .tag-option.selected{background:var(--tag-bg,var(--soft));color:var(--tag-fg,var(--primary));border-color:var(--tag-fg,var(--primary))}
+
+.preview-matching{margin-top:18px;padding:16px;border:1px solid var(--line);border-radius:10px;background:var(--bg)}
+.preview-matching-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.preview-matching-heading h4{display:flex;align-items:center;gap:7px;font-size:13px;font-weight:600}
+.preview-axis-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 14px}
+.preview-matching-issues{list-style:none;padding:0;margin:14px 0 0;color:var(--error);font-size:12px}
+.preview-matching-issues li{display:flex;align-items:flex-start;gap:7px;margin-top:7px;overflow-wrap:anywhere}
+.preview-matching-issues svg{flex-shrink:0;margin-top:3px}
+.preview-match-status{margin-top:12px;color:var(--muted);font-size:12px;overflow-wrap:anywhere}
+.preview-match-status.inline-error{color:var(--error)}
+.preview-source-changed{display:flex;align-items:flex-start;gap:7px;background:var(--warm-bg);color:var(--warm);padding:12px;border-radius:8px;font-size:12px;margin-top:14px}
+.preview-source-changed svg{flex-shrink:0;margin-top:3px}
+@media(max-width:600px){.preview-axis-grid{grid-template-columns:minmax(0,1fr)}.preview-matching{padding:12px}.preview-controls>.button{min-height:44px}}

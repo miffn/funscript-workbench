@@ -5,6 +5,8 @@ from collections import OrderedDict
 import hashlib
 import json
 import os
+import shutil
+import tempfile
 from pathlib import Path
 import re
 import threading
@@ -45,6 +47,24 @@ class PreviewService:
         self.config = config
         self._hashes = OrderedDict()
         self._hash_lock = threading.Lock()
+        self._publish_lock = threading.RLock()
+        from .preview_matching import PreviewMatching
+        self.matching = PreviewMatching(self)
+
+    @staticmethod
+    def write_json(path: Path, value: dict):
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=path.parent,
+                                             prefix='.workbench-json-', suffix='.tmp', delete=False) as handle:
+                temporary = Path(handle.name)
+                json.dump(value, handle, ensure_ascii=False)
+                handle.flush()
+                os.fsync(handle.fileno())
+            temporary.replace(path)
+        finally:
+            if temporary:
+                temporary.unlink(missing_ok=True)
 
     def work(self, work_id: int):
         with self.store.connection() as db:
@@ -120,25 +140,22 @@ class PreviewService:
             if len(available) > 1:
                 raise PreviewError("作品关联多个视频，请先选择具体视频", 409)
             selected, video = available[0]
-        expected = {f"{video.stem}{'' if axis == 'stroke' else '.' + axis}.funscript".casefold() for axis in AXES}
-        try:
-            # discover_scripts resolves returned paths; inspect original candidates first.
+        match = self.matching.state(work_id, selected['id'])
+        if match['mode'] == 'auto':
+            expected = {f"{video.stem}{'' if axis == 'stroke' else '.' + axis}.funscript".casefold() for axis in AXES}
             for candidate in video.parent.iterdir():
                 if candidate.name.casefold() in expected:
                     no_symlinks(candidate)
-            scripts = discover_scripts(video)
-            for script in scripts.values():
-                no_symlinks(script)
-                script.resolve().relative_to(video.parent.resolve())
-                load_script(script)
-        except ScriptError as error:
-            raise PreviewError(f"关联脚本无法使用：{error}") from error
-        except (OSError, ValueError) as error:
-            if isinstance(error, PreviewError):
-                raise
-            raise PreviewError(f"无法读取精确同名轴脚本：{error}") from error
+        if match['issues']:
+            raise PreviewError('；'.join(match['issues']))
+        with self.store.connection() as db:
+            rows = self.matching.assets(db, work_id)
+        scripts = {axis: self.valid_source(next(asset for asset in rows if asset['id'] == asset_id))
+                   for axis, asset_id in match['script_asset_ids'].items()}
         return {"work_id": work_id, "script_id": work["script_id"], "video_asset_id": selected["id"],
                 "video_path": str(video), "scripts": {axis: str(path) for axis, path in scripts.items()},
+                "matching_revision": match['revision'],
+                "source_signatures": self.matching.signatures(str(video), {axis: str(path) for axis, path in scripts.items()}),
                 "output_dir": str(output)}
 
     def assert_video_asset(self, work_id: int, video_asset_id: int):
@@ -215,6 +232,10 @@ class PreviewService:
         return self.config.data_dir / "preview-state" / f"{work_id}.json"
 
     def state(self, work_id: int) -> dict:
+        with self._publish_lock:
+            return self._state(work_id)
+
+    def _state(self, work_id: int) -> dict:
         work = self.work(work_id)
         output = self.output_directory(work["script_id"])
         current = self._manifest(output / "manifest.json", work["script_id"])
@@ -265,6 +286,35 @@ class PreviewService:
             except ProcessLookupError:
                 current = lock.stat()
                 if (current.st_size, current.st_mtime_ns, current.st_ino) == (stat.st_size, stat.st_mtime_ns, stat.st_ino):
+                    stage_name = value.get('workbench_stage')
+                    if stage_name:
+                        if not isinstance(stage_name, str) or Path(stage_name).name != stage_name or not stage_name.startswith('.workbench-stage-'):
+                            return
+                        stage = output / stage_name
+                        no_symlinks(stage)
+                        if stage.exists():
+                            journal = stage / 'publication.json'
+                            no_symlinks(journal)
+                            if journal.is_file():
+                                publication = json.loads(journal.read_text())
+                                names, previous = publication.get('filenames', []), publication.get('previous', [])
+                                allowed = {*MEDIA_FILES, 'manifest.json'}
+                                if not isinstance(names, list) or not isinstance(previous, list) or any(not isinstance(name, str) or name not in allowed for name in [*names, *previous]):
+                                    return
+                                if publication.get('status') == 'publishing':
+                                    # A service exit during the short publication phase restores
+                                    # the previous complete set before replaying the queued job.
+                                    for filename in names:
+                                        old, target = stage / 'prior' / filename, output / filename
+                                        no_symlinks(old)
+                                        no_symlinks(target)
+                                        if filename in previous:
+                                            if not old.is_file():
+                                                raise PreviewError('预览恢复副本缺失，请检查生成目录', 409)
+                                            shutil.copy2(old, target)
+                                        else:
+                                            target.unlink(missing_ok=True)
+                            shutil.rmtree(stage)
                     lock.unlink()
             except PermissionError:
                 pass  # A process exists; never remove its lock.
@@ -272,18 +322,99 @@ class PreviewService:
             pass
 
     def generate(self, inputs: dict, on_progress, cancel_event):
-        # Recheck inventory and all axes after queueing/restart; never trust stored paths alone.
+        # Recheck the persisted selection after queueing/restart, never stored paths alone.
         checked = self.select_inputs(inputs["work_id"], inputs["video_asset_id"])
-        if checked["script_id"] != inputs["script_id"] or checked["video_path"] != inputs["video_path"]:
-            raise PreviewError("作品或视频关联在任务排队期间变化，请刷新后重新生成")
-        self.save_previous(inputs["work_id"], inputs["script_id"])
-        self.recover_stale_lock(Path(checked["output_dir"]), inputs.get("_recovery_pid"))
-        generator_config = GeneratorConfig(work_id=checked["script_id"], video=checked["video_path"],
-            scripts=checked["scripts"], output_dir=checked["output_dir"], renderer=self.config.preview_renderer,
-            model="builtin", show_axis_hud=True, ffmpeg=self.config.ffmpeg, ffprobe=self.config.ffprobe,
-            cache_dir=self.config.data_dir / "preview-generator")
-        manifest = generate(generator_config, on_progress=on_progress, cancel_event=cancel_event)
-        if manifest.get("status") != "completed":
-            raise PreviewError("生成程序未返回完成结果")
-        self.save_previous(inputs["work_id"], inputs["script_id"])
-        return manifest
+        if any(checked[key] != inputs.get(key, checked[key]) for key in
+               ("script_id", "video_path", "scripts", "matching_revision", "source_signatures")):
+            raise PreviewError("素材或脚本匹配在任务排队期间变化，请刷新后重新生成", 409)
+        output = Path(checked['output_dir'])
+        output.mkdir(parents=True, exist_ok=True)
+        self.recover_stale_lock(output, inputs.get('_recovery_pid'))
+        lock_path = output / '.preview-generator.lock'
+        try:
+            lock_fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        except FileExistsError as error:
+            raise PreviewError('该作品有其他预览生成程序正在运行，请等待完成', 409) from error
+        with os.fdopen(lock_fd, 'w') as handle:
+            json.dump({'pid': os.getpid()}, handle)
+        stage = None
+        try:
+            self.save_previous(inputs['work_id'], inputs['script_id'])
+            stage = Path(tempfile.mkdtemp(prefix='.workbench-stage-', dir=output))
+            self.write_json(lock_path, {'pid': os.getpid(), 'workbench_stage': stage.name})
+            # Copy prior validated files into staging so normal generation can reuse them.
+            current = self._manifest(output / 'manifest.json', checked['script_id'])
+            if current and current.get('status') == 'completed' and not inputs.get('force', False):
+                for filename in [*MEDIA_FILES, 'manifest.json']:
+                    path = output / filename
+                    no_symlinks(path)
+                    if path.is_file():
+                        shutil.copy2(path, stage / filename)
+            generator_config = GeneratorConfig(work_id=checked['script_id'], video=checked['video_path'],
+                scripts=checked['scripts'], output_dir=str(stage), renderer=self.config.preview_renderer,
+                model='builtin', show_axis_hud=True, ffmpeg=self.config.ffmpeg, ffprobe=self.config.ffprobe,
+                force=bool(inputs.get('force', False)), cache_dir=self.config.data_dir / 'preview-generator')
+            manifest = generate(generator_config, on_progress=on_progress, cancel_event=cancel_event)
+            if manifest.get('status') != 'completed' or manifest.get('work_id') != checked['script_id']:
+                raise PreviewError('生成程序未返回完整的完成结果')
+            if cancel_event and cancel_event.is_set():
+                raise GenerationCancelled('Generation cancelled before publication')
+            if self.matching.signatures(checked['video_path'], checked['scripts']) != checked['source_signatures']:
+                raise PreviewError('生成期间素材发生变化，请重新匹配后再生成，保留旧预览', 409)
+            records = manifest.get('outputs', [])
+            expected = {entry.get('filename') for entry in records}
+            if not records or len(expected) != len(records) or expected != set(MEDIA_FILES):
+                raise PreviewError('生成结果文件列表无效')
+            for entry in records:
+                path = stage / entry['filename']
+                no_symlinks(path)
+                kind, index = MEDIA_FILES[entry['filename']]
+                dimensions = (1920, 1080) if kind == 'video' else (192, 108)
+                if (entry.get('kind'), entry.get('clip_index')) != (kind, index) or (entry.get('width'), entry.get('height')) != dimensions:
+                    raise PreviewError('生成结果的类型、片段或尺寸校验失败，保留旧预览')
+                if not path.is_file() or path.stat().st_size != entry.get('size') or self._checksum(path) != entry.get('sha256'):
+                    raise PreviewError('生成结果校验失败，保留旧预览')
+                entry['path'] = str(output / entry['filename'])
+            manifest['output_dir'] = str(output)
+            manifest['source_signatures'] = checked['source_signatures']
+            (stage / 'manifest.json').write_text(json.dumps(manifest, ensure_ascii=False), encoding='utf-8')
+            # Backup/rollback includes the manifest. Old results stay usable until all clips finish.
+            with self._publish_lock:
+                prior = stage / 'prior'
+                prior.mkdir()
+                names = [*expected, 'manifest.json']
+                previous_names = []
+                for filename in names:
+                    target = output / filename
+                    no_symlinks(target)
+                    if target.is_file():
+                        shutil.copy2(target, prior / filename)
+                        previous_names.append(filename)
+                publication = {'status': 'publishing', 'filenames': names, 'previous': previous_names}
+                journal = stage / 'publication.json'
+                self.write_json(journal, publication)
+                published = []
+                try:
+                    for filename in names:
+                        target = output / filename
+                        no_symlinks(target)
+                        (stage / filename).replace(target)
+                        published.append(filename)
+                    self.save_previous(inputs['work_id'], inputs['script_id'])
+                    publication['status'] = 'published'
+                    self.write_json(journal, publication)
+                except BaseException:
+                    for filename in reversed(published):
+                        old = prior / filename
+                        if old.exists():
+                            old.replace(output / filename)
+                        else:
+                            (output / filename).unlink(missing_ok=True)
+                    raise
+            return manifest
+        finally:
+            if stage:
+                # Only our freshly created staging directory under the authorized output root.
+                if stage.parent == output and stage.name.startswith('.workbench-stage-'):
+                    shutil.rmtree(stage)
+            lock_path.unlink(missing_ok=True)

@@ -36,6 +36,7 @@ beforeEach(() => {
     if (url.startsWith('/api/works?')) return Promise.resolve(response({ items: [{ ...work, tags: binding.tags }], total: 1, page: 1, page_size: 24, stats: { total: 1, pending: 1, published: 0, issues: 0 }, last_scan: null }));
     if (url === '/api/capabilities') return Promise.resolve(response({ can_open_folder: false, reason: '其他客户端不支持打开' }));
     if (url === '/api/jobs') return Promise.resolve(response({ items: [] }));
+    if (url.includes('/preview-matching')) return Promise.resolve(response({ work_id: 7, video_asset_id: null, mode: 'auto', revision: 0, script_asset_ids: {}, issues: [], videos: [], scripts: [], job: null, source_changed: false }));
     if (url.endsWith('/preview')) return Promise.resolve(response({ job: null, files: [], output_dir: '', windows_path: '' }));
     return Promise.resolve(response(work));
   });

@@ -123,9 +123,10 @@ class Scanner:
                 db.execute("INSERT OR REPLACE INTO settings(key,value) VALUES('history_imported',?)",
                            (json.dumps({"at": now(), "sources": sources, "records": len(records)}, ensure_ascii=False),))
 
-    def scan(self, roots: tuple[Root, ...] | None = None) -> dict:
+    def scan(self, roots: tuple[Root, ...] | None = None, target_id: str | None = None) -> dict:
         roots = self.config.roots if roots is None else roots
-        self.import_history()
+        if target_id is None:
+            self.import_history()
         observed: list[dict] = []
         reachable = []
         unavailable = []
@@ -151,10 +152,12 @@ class Scanner:
                     continue
                 parsed = parse_folder(directory.name) if directory.is_dir() else None
                 if not parsed:
-                    if root.label.lower() == "workspace":
+                    if target_id is None and root.label.lower() == "workspace":
                         unnumbered.append(root.windows_directory(directory))
                     continue
                 script_id, title = parsed
+                if target_id is not None and script_id != target_id:
+                    continue
                 assets = []
                 errors = []
                 try:
@@ -187,6 +190,9 @@ class Scanner:
         with self.store.connection() as db:
             selected_paths = {str(root.path) for root in roots}
             affected = {row[0] for row in db.execute("SELECT work_id,root_path FROM directories") if row[1] in selected_paths}
+            target_work = db.execute("SELECT id FROM works WHERE script_id=?", (target_id,)).fetchone() if target_id else None
+            if target_id is not None:
+                affected = {target_work[0]} if target_work else set()
             # Keep diagnostics belonging to unchecked roots. Legacy issues store
             # Windows (and, for unsafe links, Linux) paths rather than a root ID.
             def selected_issue_path(value):
@@ -195,14 +201,22 @@ class Scanner:
 
             for issue in db.execute("SELECT * FROM issues WHERE type!='cover_failed'").fetchall():
                 paths = json.loads(issue["paths"])
+                if target_id is not None:
+                    if issue["work_id"] in affected:
+                        db.execute("DELETE FROM issues WHERE id=?", (issue["id"],))
+                    continue
                 if issue["type"] == "history_unmatched" or (
                     issue["type"] == "duplicate_identifier" and issue["work_id"] in affected
                 ) or (paths and all(selected_issue_path(path) for path in paths)):
                     db.execute("DELETE FROM issues WHERE id=?", (issue["id"],))
             for kind, message, script_id, work_id, paths in scan_issues:
-                self.store.issue(db, kind, message, script_id, work_id, paths)
+                if target_id is None:
+                    self.store.issue(db, kind, message, script_id, work_id, paths)
             for root_path in reachable:
-                db.execute("UPDATE directories SET available=0 WHERE root_path=?", (root_path,))
+                if target_id is None:
+                    db.execute("UPDATE directories SET available=0 WHERE root_path=?", (root_path,))
+                elif target_work:
+                    db.execute("UPDATE directories SET available=0 WHERE root_path=? AND work_id=?", (root_path, target_work[0]))
             for item in observed:
                 script_id = item["script_id"]
                 history = db.execute("SELECT * FROM history WHERE script_id=?", (script_id,)).fetchone()
@@ -216,7 +230,7 @@ class Scanner:
                 else:
                     work_id = work["id"]
                     # Never derive manual title or status from a subsequent filesystem scan.
-                    if history and not history["applied"]:
+                    if target_id is None and history and not history["applied"]:
                         manual = json.loads(work["manual_fields"])
                         merged = {**metadata, **json.loads(work["metadata"])}
                         db.execute("UPDATE works SET title=?,status=?,metadata=?,updated_at=? WHERE id=?",
@@ -224,7 +238,7 @@ class Scanner:
                                     work["status"] if "status" in manual else history["status"],
                                     json.dumps(merged, ensure_ascii=False), timestamp, work_id))
                 affected.add(work_id)
-                if history:
+                if history and target_id is None:
                     db.execute("UPDATE history SET applied=1 WHERE script_id=?", (script_id,))
                 previous = db.execute("SELECT d.*,w.script_id FROM directories d JOIN works w ON w.id=d.work_id WHERE d.path=? AND d.work_id!=?",
                                       (item["path"], work_id)).fetchall()
@@ -268,7 +282,7 @@ class Scanner:
                     if directory["root_path"] in unavailable:
                         self.store.issue(db, "root_unavailable", "库存根目录暂时不可访问，当前展示此前扫描结果", work["script_id"], work["id"], [directory["windows_path"]])
             unmatched = db.execute("SELECT h.script_id FROM history h LEFT JOIN works w ON w.script_id=h.script_id WHERE w.id IS NULL").fetchall()
-            for row in unmatched:
+            for row in unmatched if target_id is None else []:
                 self.store.issue(db, "history_unmatched", "历史资料尚未匹配到完整编号文件夹", row["script_id"])
             previous_scan = db.execute("SELECT value FROM settings WHERE key='last_scan'").fetchone()
             previous_unavailable = json.loads(previous_scan[0]).get("unavailable_roots", []) if previous_scan else []
@@ -277,7 +291,8 @@ class Scanner:
                        "directories": len(observed), "assets": sum(len(item["assets"]) for item in observed),
                        "unnumbered": unnumbered_count, "unavailable_roots": retained_unavailable + unavailable,
                        "scanned_roots": [str(root.path) for root in roots]}
-            db.execute("INSERT OR REPLACE INTO settings(key,value) VALUES('last_scan',?)", (json.dumps({"at": timestamp, **summary}, ensure_ascii=False),))
+            if target_id is None:
+                db.execute("INSERT OR REPLACE INTO settings(key,value) VALUES('last_scan',?)", (json.dumps({"at": timestamp, **summary}, ensure_ascii=False),))
         return summary
 
     def excluded_output(self, path: Path) -> bool:

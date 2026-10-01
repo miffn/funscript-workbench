@@ -127,6 +127,16 @@ def test_inventory_output_permission_is_narrow(config):
         generate(replace(config, output_dir="/mnt/d/Media/workspace/S999"))
 
 
+def test_workbench_staging_stays_inside_current_id_output(config):
+    from preview_generator.generator import OUTPUT_ROOT, _validate_config
+    stage = OUTPUT_ROOT / config.work_id / '.workbench-stage-abcd1234'
+    assert _validate_config(replace(config, output_dir=stage))[1] == stage.resolve()
+    for forbidden in (stage / 'nested', OUTPUT_ROOT / 'S998' / stage.name,
+                      OUTPUT_ROOT / config.work_id / 'other-output'):
+        with pytest.raises(GenerationError, match='Inventory output must'):
+            _validate_config(replace(config, output_dir=forbidden))
+
+
 def test_input_change_during_encode_aborts_atomic_commit(config):
     config = replace(config, percentages=(.2,))
     result = generate(config)

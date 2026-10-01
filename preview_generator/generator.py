@@ -131,7 +131,9 @@ def _validate_config(config: Config) -> tuple[Path, Path, Path, dict[str, Path]]
     # Prevent an output typo from modifying source materials. The user authorized
     # only workspace/预览/<ID> as a generated-file exception inside D: inventory.
     inventory_root = Path("/mnt/d/Media").resolve()
-    if output.is_relative_to(inventory_root) and output != (OUTPUT_ROOT / config.work_id).resolve():
+    authorized_output = (OUTPUT_ROOT / config.work_id).resolve()
+    staging_output = output.parent == authorized_output and re.fullmatch(r"\.workbench-stage-[a-z0-9_]{8}", output.name)
+    if output.is_relative_to(inventory_root) and output != authorized_output and not staging_output:
         raise GenerationError(f"Inventory output must be {OUTPUT_ROOT / config.work_id}")
     if output == video.parent or output.is_relative_to(video.parent) and not output.is_relative_to(OUTPUT_ROOT):
         raise GenerationError("Output directory overlaps the source material directory")

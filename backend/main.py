@@ -42,6 +42,14 @@ class ScanOptions(BaseModel):
 class PreviewOptions(BaseModel):
     model_config = ConfigDict(extra="forbid")
     video_asset_id: int | None = Field(default=None, gt=0, strict=True)
+    force: bool = Field(default=False, strict=True)
+
+
+class PreviewMatchingEdit(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    video_asset_id: int = Field(gt=0, strict=True)
+    script_asset_ids: dict[str, Annotated[int, Field(strict=True, gt=0)]] = Field(max_length=6)
+    expected_revision: int = Field(ge=0, strict=True)
 
 
 class ScanRootsEdit(BaseModel):
@@ -374,6 +382,27 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
         except PreviewError as error:
             raise HTTPException(error.status_code, str(error))
 
+    @app.get('/api/works/{work_id}/preview-matching')
+    def preview_matching(work_id: int, video_asset_id: int | None = Query(default=None, gt=0)):
+        try:
+            return worker.previews.matching.state(work_id, video_asset_id)
+        except PreviewError as error:
+            raise HTTPException(error.status_code, str(error))
+
+    @app.put('/api/works/{work_id}/preview-matching')
+    def save_preview_matching(work_id: int, options: PreviewMatchingEdit):
+        try:
+            return worker.previews.matching.save(work_id, options.video_asset_id, options.script_asset_ids, options.expected_revision)
+        except PreviewError as error:
+            raise HTTPException(error.status_code, str(error))
+
+    @app.post('/api/works/{work_id}/rematch', status_code=202)
+    def rematch_files(work_id: int):
+        try:
+            return worker.enqueue_rematch(work_id)
+        except PreviewError as error:
+            raise HTTPException(error.status_code, str(error))
+
     @app.post("/api/works/{work_id}/preview", status_code=202)
     def generate_preview(work_id: int, options: PreviewOptions | None = None):
         try:
@@ -387,6 +416,7 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
                         raise PreviewError("该作品已有其他视频正在生成，请等待当前任务完成", 409)
                 return active
             inputs = worker.previews.select_inputs(work_id, options.video_asset_id if options else None)
+            inputs['force'] = bool(options and options.force)
             return worker.enqueue_preview(inputs)
         except PreviewError as error:
             raise HTTPException(error.status_code, str(error))

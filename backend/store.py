@@ -74,6 +74,14 @@ CREATE TABLE IF NOT EXISTS work_tag_state (
  revision INTEGER NOT NULL DEFAULT 0,
  manual_edited INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS preview_bindings (
+ work_id INTEGER NOT NULL REFERENCES works(id),
+ video_path TEXT NOT NULL,
+ video_asset_id INTEGER,
+ scripts TEXT NOT NULL DEFAULT '{}',
+ revision INTEGER NOT NULL DEFAULT 1,
+ PRIMARY KEY(work_id,video_path)
+);
 CREATE INDEX IF NOT EXISTS idx_assets_directory ON assets(directory_id);
 CREATE INDEX IF NOT EXISTS idx_directories_work ON directories(work_id);
 CREATE INDEX IF NOT EXISTS idx_issues_work ON issues(work_id);
@@ -107,6 +115,8 @@ class Store:
                     db.execute("PRAGMA foreign_keys=ON")
             if "inputs" not in {row[1] for row in db.execute("PRAGMA table_info(jobs)")}:
                 db.execute("ALTER TABLE jobs ADD COLUMN inputs TEXT NOT NULL DEFAULT '{}'")
+            if 'video_asset_id' not in {row[1] for row in db.execute('PRAGMA table_info(preview_bindings)')}:
+                db.execute('ALTER TABLE preview_bindings ADD COLUMN video_asset_id INTEGER')
 
     @contextmanager
     def connection(self):

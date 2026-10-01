@@ -23,7 +23,7 @@ const remote = { can_open_folder: false, reason: '不支持打开，仅素材所
 function detail(capabilities = local) { return render(<WorkDetail id={7} capabilities={capabilities} onClose={onClose} onSaved={saved} notify={notify} />); }
 
 beforeEach(() => {
-  fetchMock = vi.fn().mockImplementation((url: string) => Promise.resolve(response(url.endsWith('/preview') ? { job: null, files: [], output_dir: '/output/S025_001', windows_path: 'D:\\previews\\S025_001' } : fixture)));
+  fetchMock = vi.fn().mockImplementation((url: string) => Promise.resolve(response(url.includes('/preview-matching') ? { work_id: 7, video_asset_id: 9, mode: 'auto', revision: 0, script_asset_ids: {}, issues: [], videos: fixture.assets, scripts: [], job: null, source_changed: false } : url.endsWith('/preview') ? { job: null, files: [], output_dir: '/output/S025_001', windows_path: 'D:\\previews\\S025_001' } : fixture)));
   vi.stubGlobal('fetch', fetchMock);
   saved = vi.fn(); notify = vi.fn(); onClose = vi.fn();
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value: function(this: HTMLDialogElement) { this.open = true; } });
@@ -40,7 +40,7 @@ describe('persistent work editing', () => {
     await screen.findByRole('button', { name: '改为待发布' });
     expect((notes as HTMLTextAreaElement).value).toBe('正在输入的备注');
     expect(saved).toHaveBeenCalledOnce();
-    expect(JSON.parse(fetchMock.mock.calls.at(-1)![1].body)).toEqual({ status: 'published' });
+    expect(JSON.parse(fetchMock.mock.calls.find(([url, init]) => url === '/api/works/7' && init?.method === 'PATCH')![1].body)).toEqual({ status: 'published' });
     expect((screen.getByRole('button', { name: '保存信息' }) as HTMLButtonElement).disabled).toBe(false);
   });
 
@@ -75,7 +75,7 @@ describe('persistent work editing', () => {
     fireEvent(screen.getByRole('dialog'), new Event('cancel', { cancelable: true }));
     fireEvent.click(screen.getByRole('button', { name: '放弃更改并关闭' }));
     expect(onClose).toHaveBeenCalledOnce();
-    expect(fetchMock.mock.calls.filter(([url]) => !url.endsWith('/preview'))).toHaveLength(1);
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/works/7')).toHaveLength(1);
   });
 });
 
@@ -87,7 +87,7 @@ describe('host folder capability', () => {
     expect((button as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByText(remote.reason)).toBeTruthy();
     fireEvent.click(button);
-    expect(fetchMock.mock.calls.filter(([url]) => !url.endsWith('/preview'))).toHaveLength(1);
+    expect(fetchMock.mock.calls.filter(([url]) => url === '/api/works/7')).toHaveLength(1);
   });
 
   it('requires an explicit directory choice for conflicting paths and sends only the selected ID', async () => {
@@ -102,7 +102,7 @@ describe('host folder capability', () => {
     fetchMock.mockResolvedValueOnce(response({ message: '已发送打开请求' }));
     fireEvent.click(button);
     await waitFor(() => expect(notify).toHaveBeenCalledWith({ kind: 'success', message: '已发送打开请求' }));
-    const [, init] = fetchMock.mock.calls.at(-1)!;
+    const [, init] = fetchMock.mock.calls.find(([url]) => url === '/api/works/7/open-folder')!;
     expect(JSON.parse(init.body)).toEqual({ directory_id: 18 });
   });
 });

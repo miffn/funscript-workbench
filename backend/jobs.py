@@ -62,6 +62,8 @@ class JobWorker:
     def enqueue_preview(self, inputs: dict) -> dict:
         with self.store.connection() as db:
             db.execute("BEGIN IMMEDIATE")
+            if db.execute("SELECT 1 FROM jobs WHERE type='rematch' AND status IN ('queued','running') AND json_extract(inputs,'$.work_id')=?", (inputs['work_id'],)).fetchone():
+                raise PreviewError('作品正在重新匹配文件，请等待完成', 409)
             row = db.execute("SELECT id,inputs FROM jobs WHERE type='preview' AND status IN ('queued','running') AND json_extract(inputs,'$.work_id')=? ORDER BY id LIMIT 1", (inputs["work_id"],)).fetchone()
             if row:
                 if json.loads(row["inputs"])["video_asset_id"] != inputs["video_asset_id"]:
@@ -72,6 +74,25 @@ class JobWorker:
                 job_id = db.execute("INSERT INTO jobs(type,status,trigger,created_at,message,inputs,result) VALUES('preview','queued','manual',?,?,?,?)",
                                     (now(), "等待生成预览", json.dumps(inputs, ensure_ascii=False), json.dumps(selection))).lastrowid
         self.preview_wake_event.set()
+        return self.store.job(job_id)
+
+    def enqueue_rematch(self, work_id: int) -> dict:
+        work = self.previews.work(work_id)
+        with self.store.connection() as db:
+            db.execute('BEGIN IMMEDIATE')
+            active = self.previews.matching.active(db, work_id)
+            if active:
+                job = db.execute('SELECT type FROM jobs WHERE id=?', (active[0],)).fetchone()
+                if job[0] != 'rematch':
+                    raise PreviewError('作品正在生成预览，请等待完成后重新匹配', 409)
+                job_id = active[0]
+            else:
+                selection = ScanRoots(self.store, self.config).state(db)
+                if not selection['enabled_paths']:
+                    raise PreviewError('请至少启用一个扫描目录')
+                inputs = {'work_id': work_id, 'script_id': work['script_id'], 'enabled_paths': selection['enabled_paths']}
+                job_id = db.execute("INSERT INTO jobs(type,status,trigger,created_at,message,inputs) VALUES('rematch','queued','manual',?,?,?)", (now(), '等待重新匹配文件', json.dumps(inputs))).lastrowid
+        self.wake_event.set()
         return self.store.job(job_id)
 
     def start(self):
@@ -99,7 +120,7 @@ class JobWorker:
     def run(self):
         while not self.stop_event.is_set():
             with self.store.connection() as db:
-                queued = db.execute("SELECT id FROM jobs WHERE type='scan' AND status='queued' ORDER BY id LIMIT 1").fetchone()
+                queued = db.execute("SELECT id FROM jobs WHERE type IN ('scan','rematch') AND status='queued' ORDER BY id LIMIT 1").fetchone()
             if queued:
                 self.perform(queued[0])
                 continue
@@ -157,6 +178,8 @@ class JobWorker:
 
     def perform(self, job_id: int):
         job = self.store.job(job_id)
+        if job['type'] == 'rematch':
+            return self.perform_rematch(job_id)
         force = bool((job.get("result") or {}).get("refresh_covers"))
         with self.store.connection() as db:
             db.execute("UPDATE jobs SET status='running',started_at=?,message='扫描库存目录',progress=5 WHERE id=?", (now(), job_id))
@@ -191,3 +214,23 @@ class JobWorker:
         except Exception as error:
             with self.store.connection() as db:
                 db.execute("UPDATE jobs SET status='failed',finished_at=?,message='扫描失败',error=? WHERE id=?", (now(), str(error), job_id))
+
+    def perform_rematch(self, job_id: int):
+        job = self.store.job(job_id)
+        inputs = job['inputs']
+        with self.store.connection() as db:
+            db.execute("UPDATE jobs SET status='running',started_at=?,progress=5,message='查找当前完整编号的素材目录',error=NULL WHERE id=?", (now(), job_id))
+        try:
+            roots = tuple(root for root in self.config.roots if str(root.path) in inputs['enabled_paths'])
+            if not roots:
+                raise PreviewError('扫描目录已不在配置中，请重新选择目录')
+            result = self.scanner.scan(roots, target_id=inputs['script_id'])
+            with self.store.connection() as db:
+                db.execute("UPDATE jobs SET progress=75,message='更新当前作品的素材与封面' WHERE id=?", (job_id,))
+            result['cover'] = self.covers.generate(inputs['work_id'], force=True, root_paths=[str(root.path) for root in roots])
+            result.update(work_id=inputs['work_id'], script_id=inputs['script_id'])
+            with self.store.connection() as db:
+                db.execute("UPDATE jobs SET status='completed',finished_at=?,progress=100,message='文件匹配已刷新，请检查源视频与各轴脚本',result=? WHERE id=?", (now(), json.dumps(result, ensure_ascii=False), job_id))
+        except Exception as error:
+            with self.store.connection() as db:
+                db.execute("UPDATE jobs SET status='failed',finished_at=?,message='重新匹配文件失败',error=? WHERE id=?", (now(), str(error), job_id))

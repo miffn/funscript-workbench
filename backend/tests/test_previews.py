@@ -480,7 +480,7 @@ def test_backend_preview_real_tiny_egl_integration(previews, monkeypatch):
 
     def tiny(generator_config, **kwargs):
         assert generator_config.clip_seconds == 10 and generator_config.percentages == (0.2, 0.4, 0.6, 0.8)
-        test_config = replace(generator_config, width=160, height=90, fps=4, gif_width=80, gif_height=46, gif_fps=4,
+        test_config = replace(generator_config, fps=4, gif_fps=4,
                               simulator_width=64, simulator_height=64, margin=4, clip_seconds=1, include_audio=False, threads=1)
         return original_generate(test_config, **kwargs)
 

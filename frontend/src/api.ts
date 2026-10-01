@@ -13,6 +13,8 @@ export interface Work {
   updated_at: string; notes?: string; assets?: Asset[]; metadata?: Record<string, unknown>; tags?: Tag[]; tags_revision?: number;
 }
 export interface Job { id: number; type: string; status: string; created_at: string; started_at?: string | null; finished_at?: string | null; progress?: number; message?: string; result?: Record<string, unknown> | null; error?: string | null }
+export type PreviewAxis = 'stroke' | 'surge' | 'sway' | 'twist' | 'roll' | 'pitch';
+export interface PreviewMatching { work_id: number; video_asset_id: number | null; mode: 'auto' | 'manual'; revision: number; script_asset_ids: Partial<Record<PreviewAxis, number>>; issues: string[]; videos: Asset[]; scripts: Asset[]; job: Job | null; source_changed: boolean }
 export interface PreviewFile { filename: string; kind: 'video' | 'gif'; clip_index: number; width: number; height: number; url: string; size: number }
 export interface PreviewState { job: Job | null; files: PreviewFile[]; output_dir: string; windows_path: string; error?: string | null }
 export interface Inventory { items: Work[]; total: number; page: number; page_size: number; stats: { total: number; pending: number; published: number; issues: number }; last_scan: { at: string; [key: string]: unknown } | null }
@@ -51,7 +53,7 @@ export function formatSize(bytes: number) {
 }
 export function isActiveJob(job?: Job | null) { return !!job && ['queued', 'pending', 'running'].includes(job.status); }
 export function jobLabel(status: string, type = 'scan') {
-  return ({ queued: '排队中', pending: '排队中', running: type === 'preview' ? '生成中' : '扫描中', completed: '已完成', succeeded: '已完成', failed: '失败', interrupted: '已中断', cancelled: '已取消' } as Record<string, string>)[status] || status;
+  return ({ queued: '排队中', pending: '排队中', running: type === 'preview' ? '生成中' : type === 'rematch' ? '匹配中' : '扫描中', completed: '已完成', succeeded: '已完成', failed: '失败', interrupted: '已中断', cancelled: '已取消' } as Record<string, string>)[status] || status;
 }
 export function displayValue(value: unknown): string {
   if (value === null || value === undefined || value === '') return '—';
