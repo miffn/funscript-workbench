@@ -155,6 +155,18 @@ if (-not (Get-NetFirewallRule -Name 'ScriptWorkbench-LAN' -ErrorAction SilentlyC
 
 ## 7. 停止、更新与日志
 
+Codex 可通过发帖 skill 直接调用工作台接口，复用同一份数据库模板、资料、上传记录和生成稿，无需再次导出腾讯文档。在运行工作台的 WSL 项目目录检查连接：
+
+```bash
+.venv/bin/python scripts/workbench_client.py health
+.venv/bin/python scripts/workbench_client.py inspect --script-id S064
+.venv/bin/python scripts/workbench_client.py generate --script-id S064
+```
+
+服务地址默认为 `http://127.0.0.1:8789`，可通过 `--base-url` 或 `WORKBENCH_API_URL` 指定。`generate` 使用数据库中已保存的资料，正文导出到 `data/generated-posts/`，标题单独返回；缺少上传 Markdown 等资料时明确返回 `draft` 和缺项。用户提供新的上传 Markdown 后，用 `save-inputs --script-id <ID> --inputs-json <JSON文件>` 保存修改字段，未提供的字段保留。`save-cover` 独立保存预览封面。实际手动发布后，可用 `record-es-link --script-id <ID> --es-url <实际帖子链接>` 回填 ES 链接、状态和默认日期。这些命令不会登录、上传或发布 ES 帖子。
+
+Windows Codex 的 `prepare-es-release-post` skill 使用其 `references/workbench-connection.json` 指定实际 WSL 项目和接口地址，由 `scripts/Invoke-Workbench.ps1` 通过 WSL 执行器启动上面的客户端。移动工作台后更新这一连接配置即可；不需要新增后台进程或 MCP 服务。
+
 启动已安装的任务：
 
 ```powershell
