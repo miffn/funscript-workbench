@@ -12,7 +12,7 @@ import pytest
 
 from backend.config import Config, Root
 from backend.main import create_app
-from backend.previews import MEDIA_FILES, PreviewService
+from backend.previews import CLIP_MEDIA_FILES as MEDIA_FILES, PreviewService
 from backend.scanner import Scanner
 from backend.scan_roots import ScanRoots
 from backend.store import Store
@@ -24,13 +24,13 @@ SCRIPT = json.dumps({'actions': [{'at': 0, 'pos': 0}, {'at': 10000, 'pos': 100}]
 
 
 @pytest.fixture
-def matching(tmp_path):
+def matching(tmp_path, fake_heatmap_tool):
     root = tmp_path / 'workspace'
     root.mkdir()
     config = Config(data_dir=tmp_path / 'data',
                     roots=(Root(root, r'D:\Media\workspace', 'workspace'),),
                     preview_output_root=root / '预览', open_mode='gateway',
-                    ffmpeg='missing-test-ffmpeg', ffprobe='missing-test-ffprobe')
+                    ffmpeg='missing-test-ffmpeg', ffprobe='missing-test-ffprobe', heatmap_tool=fake_heatmap_tool)
     store = Store(config.data_dir)
     scanner = Scanner(store, config)
     return config, store, scanner
@@ -463,7 +463,7 @@ def test_force_generation_stages_outputs_and_promotes_only_complete_success(matc
         if outcome != 'success':
             assert (destination / 'manifest.json').read_bytes() == old_manifest
         state = client.get(f'/api/works/{work_id(store)}/preview').json()
-        assert len(state['files']) == 8
+        assert len(state['files']) == (9 if outcome == 'success' else 8)
 
 
 def interrupted_publication(config, status='publishing', missing_previous=False):

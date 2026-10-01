@@ -52,6 +52,7 @@ class Config:
     open_mode: str = "native"
     preview_output_root: Path = Path("/mnt/d/Media/workspace/预览")
     preview_renderer: Path = PROJECT_DIR / "preview_generator" / "build" / "ofs-preview-renderer"
+    heatmap_tool: Path = PROJECT_DIR / 'backend' / 'tools' / 'heatmapcreatorv1.0.exe'
 
     @classmethod
     def from_environment(cls) -> "Config":
@@ -78,4 +79,5 @@ class Config:
                    open_mode=os.environ.get("WORKBENCH_OPEN_MODE", "native"),
                    preview_output_root=Path(os.environ.get("WORKBENCH_PREVIEW_OUTPUT_ROOT", "/mnt/d/Media/workspace/预览")),
                    preview_renderer=Path(os.environ.get("WORKBENCH_PREVIEW_RENDERER", str(PROJECT_DIR / "preview_generator" / "build" / "ofs-preview-renderer"))),
+                   heatmap_tool=Path(os.environ.get('WORKBENCH_HEATMAP_TOOL', str(PROJECT_DIR / 'backend' / 'tools' / 'heatmapcreatorv1.0.exe'))),
                    host_key_file=Path(os.environ.get("WORKBENCH_HOST_KEY_FILE", str(data_dir / "host.key"))))

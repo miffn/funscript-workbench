@@ -55,6 +55,20 @@ beforeEach(() => {
 afterEach(() => { vi.useRealTimers(); cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe('preview generation workflow', () => {
+  it('shows the full-length heatmap separately from four clips and keeps legacy results usable', async () => {
+    state = { ...empty, files: [...outputFiles, { filename: '热力图.png', kind: 'heatmap', clip_index: 0,
+      width: 2048, height: 1002, size: 4096, url: '/api/works/7/preview/files/heatmap.png' }] };
+    render(<PreviewSection work={work} capabilities={local} />);
+    const png = await screen.findByRole('link', { name: /完整时长热力图/ });
+    expect(png.getAttribute('download')).toBe('热力图.png');
+    expect(screen.getByText('9 个文件')).toBeTruthy();
+    expect(document.querySelectorAll('.preview-clip')).toHaveLength(5);
+    expect(document.querySelectorAll('.preview-clip > span')[4].textContent).toBe('热力图');
+    expect(screen.queryByText('片段 5')).toBeNull();
+    expect(document.querySelector('img')).toBeNull();
+    expect(screen.queryByText(/现有结果尚无热力图/)).toBeNull();
+  });
+
   it('submits the only video by asset ID, prevents double clicks and renders actual server progress without replacing edits', async () => {
     render(<WorkDetail id={7} capabilities={local} onClose={vi.fn()} onSaved={vi.fn()} notify={vi.fn()} />);
     const notes = await screen.findByLabelText('备注');
@@ -110,6 +124,7 @@ describe('preview generation workflow', () => {
     await waitFor(() => expect(screen.getAllByRole('link')).toHaveLength(8));
     expect(screen.getByRole('button', { name: '一键生成预览' })).toBeTruthy();
     expect(screen.getByText(/已有且输入未变化的结果会复用/)).toBeTruthy();
+    expect(screen.getByText(/现有结果尚无热力图/)).toBeTruthy();
     const open = screen.getByRole('button', { name: '打开预览文件夹' });
     expect((open as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(open);

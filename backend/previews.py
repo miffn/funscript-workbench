@@ -17,12 +17,14 @@ from preview_generator.scripts import AXES, ScriptError, discover_scripts, load_
 
 from .config import Config, normalize_id
 from .store import Store
+from .heatmaps import generate_heatmap
 
 
-MEDIA_FILES = {
+CLIP_MEDIA_FILES = {
     **{f"预览视频{index}.webm": ("video", index) for index in range(1, 5)},
     **{f"预览gif{index}.gif": ("gif", index) for index in range(1, 5)},
 }
+MEDIA_FILES = {**CLIP_MEDIA_FILES, '热力图.png': ('heatmap', 0)}
 
 
 class PreviewError(ValueError):
@@ -226,7 +228,7 @@ class PreviewService:
                 files[filename] = {"filename": filename, "kind": kind, "clip_index": index, "width": width,
                                    "height": height, "url": f"/api/works/{work['id']}/preview/files/{quote(filename)}?v={checksum[:20]}",
                                    "size": path.stat().st_size}
-        return sorted(files.values(), key=lambda item: (item["clip_index"], item["kind"] != "video"))
+        return sorted(files.values(), key=lambda item: (item['kind'] == 'heatmap', item["clip_index"], item["kind"] != "video"))
 
     def state_path(self, work_id: int) -> Path:
         return self.config.data_dir / "preview-state" / f"{work_id}.json"
@@ -354,9 +356,38 @@ class PreviewService:
                 scripts=checked['scripts'], output_dir=str(stage), renderer=self.config.preview_renderer,
                 model='builtin', show_axis_hud=True, ffmpeg=self.config.ffmpeg, ffprobe=self.config.ffprobe,
                 force=bool(inputs.get('force', False)), cache_dir=self.config.data_dir / 'preview-generator')
-            manifest = generate(generator_config, on_progress=on_progress, cancel_event=cancel_event)
+            def preview_progress(event):
+                if on_progress:
+                    on_progress({**event, 'progress': event.get('progress', 0) * .9,
+                                 'stage': 'previews_ready' if event.get('stage') == 'completed' else event.get('stage')})
+            manifest = generate(generator_config, on_progress=preview_progress, cancel_event=cancel_event)
             if manifest.get('status') != 'completed' or manifest.get('work_id') != checked['script_id']:
                 raise PreviewError('生成程序未返回完整的完成结果')
+            clip_records = manifest.get('outputs', [])
+            if len(clip_records) != len(CLIP_MEDIA_FILES) or {entry.get('filename') for entry in clip_records} != set(CLIP_MEDIA_FILES):
+                raise PreviewError('生成结果文件列表无效')
+            if on_progress:
+                on_progress({'stage': 'heatmap', 'progress': .92})
+            no_symlinks(self.config.heatmap_tool)
+            if not self.config.heatmap_tool.is_file():
+                raise PreviewError('指定的热力图工具不可用，请检查热力图工具路径')
+            heatmap_fingerprint = hashlib.sha256(json.dumps({
+                'scripts': manifest.get('scripts'), 'duration_seconds': manifest.get('video', {}).get('duration_seconds'),
+                'tool_sha256': self._checksum(self.config.heatmap_tool),
+                'adapter_sha256': self._checksum(Path(__file__).with_name('heatmaps.py')),
+            }, sort_keys=True).encode()).hexdigest()
+            old_heatmap = next((entry for entry in (current or {}).get('outputs', []) if entry.get('filename') == '热力图.png'), None)
+            heatmap_path = stage / '热力图.png'
+            if (not inputs.get('force', False) and current and current.get('heatmap_fingerprint') == heatmap_fingerprint
+                    and old_heatmap and heatmap_path.is_file() and self._checksum(heatmap_path) == old_heatmap.get('sha256')):
+                heatmap = {**old_heatmap, 'path': str(heatmap_path), 'reused': True}
+            else:
+                heatmap = generate_heatmap(checked['script_id'], checked['scripts'], stage,
+                    duration_seconds=manifest.get('video', {}).get('duration_seconds'),
+                    cancel_event=cancel_event, tool_path=self.config.heatmap_tool)
+                heatmap['reused'] = False
+            manifest['outputs'].append(heatmap)
+            manifest['heatmap_fingerprint'] = heatmap_fingerprint
             if cancel_event and cancel_event.is_set():
                 raise GenerationCancelled('Generation cancelled before publication')
             if self.matching.signatures(checked['video_path'], checked['scripts']) != checked['source_signatures']:
@@ -369,8 +400,10 @@ class PreviewService:
                 path = stage / entry['filename']
                 no_symlinks(path)
                 kind, index = MEDIA_FILES[entry['filename']]
-                dimensions = (1920, 1080) if kind == 'video' else (192, 108)
-                if (entry.get('kind'), entry.get('clip_index')) != (kind, index) or (entry.get('width'), entry.get('height')) != dimensions:
+                dimensions_valid = ((entry.get('width'), entry.get('height')) == ((1920, 1080) if kind == 'video' else (192, 108))
+                                    if kind != 'heatmap' else entry.get('width') == 2048 and isinstance(entry.get('height'), int)
+                                    and not isinstance(entry.get('height'), bool) and 1 <= entry['height'] <= 4096)
+                if (entry.get('kind'), entry.get('clip_index')) != (kind, index) or not dimensions_valid:
                     raise PreviewError('生成结果的类型、片段或尺寸校验失败，保留旧预览')
                 if not path.is_file() or path.stat().st_size != entry.get('size') or self._checksum(path) != entry.get('sha256'):
                     raise PreviewError('生成结果校验失败，保留旧预览')
@@ -411,6 +444,8 @@ class PreviewService:
                         else:
                             (output / filename).unlink(missing_ok=True)
                     raise
+            if on_progress:
+                on_progress({'stage': 'completed', 'progress': 1.0})
             return manifest
         finally:
             if stage:

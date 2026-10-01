@@ -18,7 +18,7 @@ import pytest
 from backend.config import Config, PROJECT_DIR, Root
 from backend.jobs import JobWorker
 from backend.main import create_app
-from backend.previews import MEDIA_FILES, PreviewError, PreviewService
+from backend.previews import CLIP_MEDIA_FILES as MEDIA_FILES, PreviewError, PreviewService
 from backend.scanner import Scanner
 from backend.store import Store, now
 import backend.previews as preview_module
@@ -26,12 +26,12 @@ from preview_generator import GenerationCancelled
 
 
 @pytest.fixture
-def previews(tmp_path):
+def previews(tmp_path, fake_heatmap_tool):
     root = tmp_path / "workspace"
     root.mkdir()
     config = Config(data_dir=tmp_path / "data", roots=(Root(root, "D:\\Media\\workspace", "workspace"),),
                     preview_output_root=root / "预览", open_mode="gateway",
-                    ffmpeg="missing-ffmpeg-for-covers", ffprobe="missing-ffprobe-for-covers")
+                    ffmpeg="missing-ffmpeg-for-covers", ffprobe="missing-ffprobe-for-covers", heatmap_tool=fake_heatmap_tool)
     store = Store(config.data_dir)
     return config, store, Scanner(store, config)
 
@@ -91,6 +91,8 @@ def fake_generate(config, on_progress=None, cancel_event=None):
     if cancel_event and cancel_event.is_set():
         raise GenerationCancelled("cancelled")
     manifest = make_manifest(Path(config.output_dir), config.work_id)
+    manifest['video'] = {'duration_seconds': 10}
+    manifest['scripts'] = {axis: {'sha256': hashlib.sha256(Path(path).read_bytes()).hexdigest()} for axis, path in config.scripts.items()}
     if on_progress:
         on_progress({"progress": 1.0, "stage": "completed"})
     return manifest
@@ -126,12 +128,12 @@ def test_preview_api_generate_persists_and_serves_fixed_media(previews, monkeypa
         assert finished["result"]["work_id"] == work["id"]
         assert set(seen[0].scripts) == {"stroke", "pitch"}
         state = client.get(f"/api/works/{work['id']}/preview").json()
-        assert len(state["files"]) == 8 and state["error"] is None
+        assert len(state["files"]) == 9 and state["error"] is None
         assert state["windows_path"].endswith("预览\\S070")
         for media in state["files"]:
             fetched = client.get(media["url"])
             assert fetched.status_code == 200 and len(fetched.content) == media["size"]
-            assert fetched.headers["content-type"] == ("video/webm" if media["kind"] == "video" else "image/gif")
+            assert fetched.headers["content-type"] == {'video': 'video/webm', 'gif': 'image/gif', 'heatmap': 'image/png'}[media['kind']]
         assert client.get(f"/api/works/{work['id']}/preview/files/manifest.json").status_code == 404
         assert client.get(f"/api/works/{work['id']}/preview/files/{quote('main.mp4')}").status_code == 404
         assert client.get(f"/api/works/{work['id']}/preview/files/%2e%2e%2fmain.mp4").status_code == 404
@@ -224,7 +226,7 @@ def test_scan_and_web_requests_continue_during_preview(previews, monkeypatch):
         scan = worker.enqueue()
         wait_job(store, scan["id"])
         assert store.job(preview["id"])["status"] == "running"
-        assert store.job(preview["id"])["progress"] == 40
+        assert store.job(preview["id"])["progress"] == 36
         with TestClient(app) as client:
             begin = time.monotonic()
             assert client.get("/api/health").status_code == 200
@@ -282,7 +284,7 @@ def test_failure_readable_and_previous_outputs_retained(previews, monkeypatch):
     worker.perform_preview(queued["id"])
     failed = store.job(queued["id"])
     assert failed["status"] == "failed" and "测试编码失败" in failed["error"]
-    assert failed["result"]["work_id"] == work["id"] and failed["progress"] == 30
+    assert failed["result"]["work_id"] == work["id"] and failed["progress"] == 27
     state = worker.previews.state(work["id"])
     assert len(state["files"]) == 8 and "测试编码失败" in state["error"]
     retried = worker.enqueue_preview(worker.previews.select_inputs(work["id"]))
@@ -495,9 +497,77 @@ def test_backend_preview_real_tiny_egl_integration(previews, monkeypatch):
         job = client.get(f"/api/jobs/{response.json()['id']}").json()
         assert job["status"] == "completed", job.get("error")
         state = client.get(f"/api/works/{work['id']}/preview").json()
-        assert len(state["files"]) == 8
-        assert {file["kind"] for file in state["files"]} == {"video", "gif"}
+        assert len(state["files"]) == 9
+        assert {file["kind"] for file in state["files"]} == {"video", "gif", "heatmap"}
         for file in state["files"]:
             assert client.get(file["url"]).status_code == 200
         assert video.read_bytes() == before_video
         assert client.get(f"/api/works/{work['id']}").json()["status"] == "pending"
+
+
+def test_heatmap_added_to_legacy_results_reused_and_invalidated(previews, monkeypatch):
+    config, store, scanner = previews
+    folder, _ = source(config.roots[0].path)
+    scanner.scan()
+    work = first_work(store)
+    service = PreviewService(store, config)
+    output = config.preview_output_root / work['script_id']
+    make_manifest(output, work['script_id'])  # Older eight-file manifests remain readable.
+    assert len(service.state(work['id'])['files']) == 8
+    monkeypatch.setattr(preview_module, 'generate', fake_generate)
+    original_render = preview_module.generate_heatmap
+    rendered = []
+    def render(*args, **kwargs):
+        rendered.append(kwargs['duration_seconds'])
+        return original_render(*args, **kwargs)
+    monkeypatch.setattr(preview_module, 'generate_heatmap', render)
+    events = []
+    first = service.generate(service.select_inputs(work['id']), events.append, threading.Event())
+    assert rendered == [10]
+    assert len(service.state(work['id'])['files']) == 9
+    assert first['outputs'][-1]['kind'] == 'heatmap'
+    assert events[-1] == {'stage': 'completed', 'progress': 1.0}
+    assert all(event['progress'] < 1 for event in events[:-1])
+    assert events[-2]['stage'] == 'heatmap'
+    second = service.generate(service.select_inputs(work['id']), None, threading.Event())
+    assert second['outputs'][-1]['reused'] is True and len(rendered) == 1
+    (output / '热力图.png').write_bytes(b'corrupted')
+    service.generate(service.select_inputs(work['id']), None, threading.Event())
+    assert len(rendered) == 2
+    config.heatmap_tool.write_bytes(b'updated-tool')
+    service.generate(service.select_inputs(work['id']), None, threading.Event())
+    assert len(rendered) == 3
+    script = folder / 'main.funscript'
+    data = json.loads(script.read_text())
+    data['actions'][0]['pos'] = 50
+    script.write_text(json.dumps(data))
+    service.generate(service.select_inputs(work['id']), None, threading.Event())
+    assert len(rendered) == 4
+    forced = service.generate({**service.select_inputs(work['id']), 'force': True}, None, threading.Event())
+    assert forced['outputs'][-1]['reused'] is False and len(rendered) == 5
+
+
+@pytest.mark.parametrize('failure', ['tool_error', 'invalid_size', 'cancel'])
+def test_heatmap_failure_preserves_entire_previous_generation(previews, monkeypatch, failure):
+    config, store, scanner = previews
+    source(config.roots[0].path)
+    scanner.scan()
+    service = PreviewService(store, config)
+    work = first_work(store)
+    monkeypatch.setattr(preview_module, 'generate', fake_generate)
+    service.generate(service.select_inputs(work['id']), None, threading.Event())
+    output = config.preview_output_root / work['script_id']
+    original = {path.name: path.read_bytes() for path in output.iterdir() if path.is_file()}
+    original_render = preview_module.generate_heatmap
+    def fail(*args, **kwargs):
+        if failure == 'cancel':
+            raise GenerationCancelled('cancelled heatmap')
+        if failure == 'tool_error':
+            raise RuntimeError('heatmap tool failed')
+        return {**original_render(*args, **kwargs), 'width': 10}
+    monkeypatch.setattr(preview_module, 'generate_heatmap', fail)
+    with pytest.raises((RuntimeError, PreviewError)):
+        service.generate({**service.select_inputs(work['id']), 'force': True}, None, threading.Event())
+    assert {path.name: path.read_bytes() for path in output.iterdir() if path.is_file()} == original
+    assert len(service.state(work['id'])['files']) == 9
+    assert not list(output.glob('.workbench-stage-*'))

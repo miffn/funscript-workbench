@@ -147,7 +147,7 @@ class JobWorker:
             db.execute("UPDATE jobs SET status='running',started_at=?,message='检查原视频及全部关联轴脚本',progress=0,error=NULL,result=? WHERE id=?", (now(), json.dumps(selection), job_id))
         stages = {"check": "检查素材与工具", "probe": "检查视频", "fingerprint": "校验输入与缓存", "tools": "检查生成工具",
                   "render": "渲染模拟器", "encode_video": "压制预览视频", "encode_gif": "压制 GIF", "saved": "保存成品",
-                  "reuse": "复用已有成品", "completed": "预览生成完成"}
+                  "reuse": "复用已有成品", "previews_ready": "预览片段已完成", "heatmap": "生成完整时长热力图", "completed": "预览与热力图生成完成"}
 
         def progress(event):
             value = max(0, min(99, int(float(event.get("progress", 0)) * 100)))
@@ -166,7 +166,7 @@ class JobWorker:
             result = {**selection, "manifest": manifest, "output_dir": str(self.config.preview_output_root / inputs["script_id"]),
                       "files": self.previews.state(inputs["work_id"])["files"]}
             with self.store.connection() as db:
-                db.execute("UPDATE jobs SET status='completed',finished_at=?,progress=100,message='预览生成完成',result=?,error=NULL WHERE id=?", (now(), json.dumps(result, ensure_ascii=False), job_id))
+                db.execute("UPDATE jobs SET status='completed',finished_at=?,progress=100,message='预览与热力图生成完成',result=?,error=NULL WHERE id=?", (now(), json.dumps(result, ensure_ascii=False), job_id))
         except GenerationCancelled:
             if not self.stop_event.is_set():
                 with self.store.connection() as db:

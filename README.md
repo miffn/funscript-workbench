@@ -46,6 +46,8 @@ ctest --test-dir preview_generator/build --output-on-failure
 
 检查两个素材目录在 WSL 中可读。生成结果写入 `D:\Media\workspace\预览\`，该目录需要写权限。
 
+热力图工具及内置资源已集成在 `backend/tools/heatmapcreatorv1.0.exe`，默认按项目位置定位；预览渲染器源码和模型位于 `preview_generator/`。无需另行准备个人工具目录。WSL 需启用 Windows 程序互操作；后台自动向工具提供所选各轴脚本的临时副本，并跳过等待回车。原素材不会被改写。一次预览任务输出 4 个 WebM、4 个 GIF 和 `热力图.png`。项目移至另一位置后，在新目录重新构建渲染器并重新安装服务；系统依赖仍按上述步骤安装。
+
 ## 3. 初始化持久化目录
 
 在 WSL 项目目录执行以下命令。已有密钥不会被覆盖。
@@ -85,6 +87,7 @@ curl --fail http://127.0.0.1:8789/api/health
 | `WORKBENCH_ROOTS_JSON` | 两个默认素材目录的 WSL/Windows 路径映射 |
 | `WORKBENCH_PREVIEW_OUTPUT_ROOT` | `/mnt/d/Media/workspace/预览` |
 | `WORKBENCH_PREVIEW_RENDERER` | `<项目>/preview_generator/build/ofs-preview-renderer` |
+| `WORKBENCH_HEATMAP_TOOL` | `<项目>/backend/tools/heatmapcreatorv1.0.exe`（通常无需覆盖） |
 | `WORKBENCH_OPEN_MODE` | 安装服务时设为 `gateway` |
 
 Windows 网关的目录打开白名单目前固定在 `scripts/windows_gateway.py` 的 `FOLDER_ROOTS`；更换素材目录时须与后端路径映射一并调整。改变数据目录或密钥位置时，也要给 Windows 网关传入同一密钥文件。

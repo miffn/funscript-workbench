@@ -454,7 +454,7 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
         except PreviewError as error:
             raise HTTPException(error.status_code, str(error))
         kind = MEDIA_FILES[filename][0]
-        return FileResponse(path, media_type="video/webm" if kind == "video" else "image/gif", filename=filename,
+        return FileResponse(path, media_type={'video': 'video/webm', 'gif': 'image/gif', 'heatmap': 'image/png'}[kind], filename=filename,
                             content_disposition_type="inline", headers={"Cache-Control": "private, max-age=3600"})
 
     @app.post("/api/works/{work_id}/preview/open-folder")
