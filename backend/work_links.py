@@ -93,4 +93,9 @@ class WorkLinks:
             db.execute('INSERT INTO work_links(work_id,overrides,revision) VALUES(?,?,?) ON CONFLICT(work_id) DO UPDATE SET overrides=excluded.overrides,revision=excluded.revision',
                        (work_id, json.dumps(overrides, ensure_ascii=False), expected_revision + 1))
             db.execute('UPDATE works SET updated_at=? WHERE id=?', (now(), work_id))
+            if changes.get('es'):
+                work = db.execute('SELECT manual_fields FROM works WHERE id=?', (work_id,)).fetchone()
+                manual = set(json.loads(work['manual_fields'])) | {'es_published'}
+                db.execute("UPDATE works SET es_published=1,status=CASE WHEN patreon_published=1 THEN 'published' ELSE 'pending' END,manual_fields=? WHERE id=?",
+                           (json.dumps(sorted(manual)), work_id))
             return self.state(db, work_id)

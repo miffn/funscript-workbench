@@ -15,6 +15,8 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS works (
  id INTEGER PRIMARY KEY, script_id TEXT NOT NULL UNIQUE, title TEXT NOT NULL,
  status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','published')),
+ es_published INTEGER NOT NULL DEFAULT 0 CHECK(es_published IN (0,1)),
+ patreon_published INTEGER NOT NULL DEFAULT 0 CHECK(patreon_published IN (0,1)),
  notes TEXT NOT NULL DEFAULT '', metadata TEXT NOT NULL DEFAULT '{}', manual_fields TEXT NOT NULL DEFAULT '[]',
  created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
@@ -122,6 +124,26 @@ class Store:
                 db.execute("ALTER TABLE jobs ADD COLUMN inputs TEXT NOT NULL DEFAULT '{}'")
             if 'video_asset_id' not in {row[1] for row in db.execute('PRAGMA table_info(preview_bindings)')}:
                 db.execute('ALTER TABLE preview_bindings ADD COLUMN video_asset_id INTEGER')
+            # Migrate each platform once; subsequent restarts preserve manual choices.
+            db.commit()
+            db.execute('BEGIN IMMEDIATE')
+            work_columns = {row[1] for row in db.execute('PRAGMA table_info(works)')}
+            for field in ('es_published', 'patreon_published'):
+                if field not in work_columns:
+                    db.execute(f'ALTER TABLE works ADD COLUMN {field} INTEGER NOT NULL DEFAULT 0 CHECK({field} IN (0,1))')
+                    db.execute(f"UPDATE works SET {field}=(status='published')")
+            if 'es_published' not in work_columns:
+                from .work_links import WorkLinks, WorkLinksError, validate_link
+                links = WorkLinks(self)
+                for work in db.execute('SELECT id FROM works').fetchall():
+                    try:
+                        es_url = validate_link(links.state(db, work['id'])['links']['es'])
+                    except WorkLinksError:
+                        continue
+                    if es_url:
+                        db.execute('UPDATE works SET es_published=1 WHERE id=?', (work['id'],))
+            if not {'es_published', 'patreon_published'} <= work_columns:
+                db.execute("UPDATE works SET status=CASE WHEN es_published=1 AND patreon_published=1 THEN 'published' ELSE 'pending' END")
 
     @contextmanager
     def connection(self):

@@ -18,6 +18,15 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 function editor(onSaved = vi.fn(), onClose = vi.fn()) {
   render(<WorkLinkEditor work={work} initialKind="video" onSaved={onSaved} onClose={onClose} />); return { onSaved, onClose };
 }
+async function loadedInput(label: string) {
+  await screen.findByLabelText(label);
+  await waitFor(() => {
+    expect(screen.queryByText('正在读取发布链接')).toBeNull();
+    expect((screen.getByLabelText('Patreon 文章链接') as HTMLInputElement).value).toBe(current.links.patreon);
+    expect(document.activeElement).toBe(screen.getByLabelText('视频链接'));
+  });
+  return screen.getByLabelText(label);
+}
 describe('inventory link editing', () => {
   it('shows four labeled actions and distinguishes filled from missing links', () => {
     const edit = vi.fn(); render(<WorkLinkButtons work={work} onEdit={edit} />);
@@ -27,7 +36,7 @@ describe('inventory link editing', () => {
     expect(edit).toHaveBeenCalledWith('es');
   });
   it('focuses the chosen field and saves only changed fields with the revision', async () => {
-    const callbacks = editor(); const input = await screen.findByLabelText('视频链接');
+    const callbacks = editor(); const input = await loadedInput('视频链接');
     await waitFor(() => expect(document.activeElement).toBe(input));
     fireEvent.change(input, { target: { value: 'https://example.com/video?part=2' } });
     const updated = { ...current, links: { ...current.links, video: 'https://example.com/video?part=2' }, links_revision: 3 };
@@ -37,7 +46,7 @@ describe('inventory link editing', () => {
     expect(callbacks.onClose).toHaveBeenCalledOnce();
   });
   it('can clear an imported URL without changing other fields', async () => {
-    const callbacks = editor(); const input = await screen.findByLabelText('Patreon 文章链接');
+    const callbacks = editor(); const input = await loadedInput('Patreon 文章链接');
     fireEvent.change(input, { target: { value: '' } });
     fetchMock.mockResolvedValueOnce(response({ ...current, links: { ...current.links, patreon: '' }, links_revision: 3 }));
     fireEvent.click(screen.getByRole('button', { name: '保存链接' }));
@@ -45,7 +54,7 @@ describe('inventory link editing', () => {
     expect(JSON.parse(fetchMock.mock.calls.find(([, init]) => init?.method === 'PATCH')![1].body).links).toEqual({ patreon: '' });
   });
   it.each(['javascript:alert(1)', 'https://user:secret@example.com', 'https://example.com/a b'])('rejects unsafe URL %s before saving', async value => {
-    editor(); const input = await screen.findByLabelText('视频链接');
+    editor(); const input = await loadedInput('视频链接');
     fireEvent.change(input, { target: { value } });
     expect((input as HTMLInputElement).value).toBe(value);
     fireEvent.click(screen.getByRole('button', { name: '保存链接' }));
@@ -53,7 +62,7 @@ describe('inventory link editing', () => {
     expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'PATCH')).toBe(false);
   });
   it('keeps failed edits and guards unsaved closing', async () => {
-    const callbacks = editor(); const input = await screen.findByLabelText('视频链接');
+    const callbacks = editor(); const input = await loadedInput('视频链接');
     fireEvent.change(input, { target: { value: 'https://example.com/video' } });
     fetchMock.mockResolvedValueOnce(response({ detail: '数据库忙' }, 503));
     fireEvent.click(screen.getByRole('button', { name: '保存链接' })); await screen.findByText('链接未保存：数据库忙');
@@ -65,7 +74,7 @@ describe('inventory link editing', () => {
     expect(screen.queryByText('链接修改尚未保存')).toBeNull();
   });
   it('prevents overwriting newer links until explicit refresh', async () => {
-    editor(); const input = await screen.findByLabelText('视频链接');
+    editor(); const input = await loadedInput('视频链接');
     fireEvent.change(input, { target: { value: 'https://example.com/draft' } });
     fetchMock.mockResolvedValueOnce(response({ detail: 'revision mismatch' }, 409));
     fireEvent.click(screen.getByRole('button', { name: '保存链接' }));

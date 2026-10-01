@@ -29,7 +29,7 @@ def inventory(tmp_path):
         ids = {row['script_id']: row['id'] for row in db.execute('SELECT id,script_id FROM works')}
         metadata = {'Patreon post ink': 'https://example.test/patreon', 'Video URL': 'https://example.test/video',
                     'ES Link': 'https://example.test/es', 'Script Link': 'https://example.test/script', 'unrelated': 'retained'}
-        db.execute('UPDATE works SET metadata=?,title=?,notes=?,status=? WHERE id=?',
+        db.execute('UPDATE works SET metadata=?,title=?,notes=?,status=?,es_published=1,patreon_published=1 WHERE id=?',
                    (json.dumps(metadata), 'Manual title', 'Private notes', 'published', ids['S064']))
     return config, app, scanner, ids
 

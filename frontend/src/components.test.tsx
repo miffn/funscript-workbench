@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Mock } from 'vitest';
 import type { Notice } from './App';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { Cover, WorkDetail } from './components';
+import { Cover, PublicationBadges, WorkDetail } from './components';
 import { historyEntries, safeLink } from './api';
 import type { Work } from './api';
 
@@ -35,13 +35,71 @@ describe('persistent work editing', () => {
     detail();
     const notes = await screen.findByLabelText('备注');
     fireEvent.change(notes, { target: { value: '正在输入的备注' } });
-    fetchMock.mockResolvedValueOnce(response({ ...fixture, status: 'published' }));
-    fireEvent.click(screen.getByRole('button', { name: '标记已发布' }));
-    await screen.findByRole('button', { name: '改为待发布' });
+    fetchMock.mockResolvedValueOnce(response({ ...fixture, es_published: true, patreon_published: false }));
+    fireEvent.click(screen.getByRole('button', { name: '标记 ES 已发布' }));
+    await screen.findByRole('button', { name: '将 ES 改为待发布' });
     expect((notes as HTMLTextAreaElement).value).toBe('正在输入的备注');
     expect(saved).toHaveBeenCalledOnce();
-    expect(JSON.parse(fetchMock.mock.calls.find(([url, init]) => url === '/api/works/7' && init?.method === 'PATCH')![1].body)).toEqual({ status: 'published' });
+    expect(JSON.parse(fetchMock.mock.calls.find(([url, init]) => url === '/api/works/7' && init?.method === 'PATCH')![1].body)).toEqual({ es_published: true });
     expect((screen.getByRole('button', { name: '保存信息' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('updates Patreon separately, then retracts ES without resetting either draft', async () => {
+    fetchMock.mockResolvedValueOnce(response({ ...fixture, es_published: true, patreon_published: false }));
+    detail();
+    const title = await screen.findByLabelText('标题');
+    const notes = screen.getByLabelText('备注');
+    fireEvent.change(title, { target: { value: '尚未保存的标题' } });
+    fireEvent.change(notes, { target: { value: '尚未保存的备注' } });
+    fetchMock.mockResolvedValueOnce(response({ ...fixture, status: 'published', es_published: true, patreon_published: true }));
+    fireEvent.click(screen.getByRole('button', { name: '标记 Patreon 已发布' }));
+    await screen.findByRole('button', { name: '将 Patreon 改为待发布' });
+    fetchMock.mockResolvedValueOnce(response({ ...fixture, es_published: false, patreon_published: true }));
+    fireEvent.click(screen.getByRole('button', { name: '将 ES 改为待发布' }));
+    await screen.findByRole('button', { name: '标记 ES 已发布' });
+    expect(screen.getByRole('button', { name: '将 Patreon 改为待发布' })).toBeTruthy();
+    expect((title as HTMLInputElement).value).toBe('尚未保存的标题');
+    expect((notes as HTMLTextAreaElement).value).toBe('尚未保存的备注');
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'PATCH').map(([, init]) => JSON.parse(init.body))).toEqual([{ patreon_published: true }, { es_published: false }]);
+  });
+
+  it('keeps both current publication states if updating a platform fails', async () => {
+    fetchMock.mockResolvedValueOnce(response({ ...fixture, es_published: true, patreon_published: false }));
+    detail();
+    await screen.findByLabelText('备注');
+    fetchMock.mockResolvedValueOnce(response({ detail: '写入失败' }, 503));
+    fireEvent.click(screen.getByRole('button', { name: '标记 Patreon 已发布' }));
+    await screen.findByText('发布状态未更新：写入失败');
+    expect(screen.getByText('ES 已发布')).toBeTruthy();
+    expect(screen.getByText('Patreon 待发布')).toBeTruthy();
+    expect(saved).not.toHaveBeenCalled();
+  });
+
+  it('retains unsaved axis matching when publication changes and blocks duplicate writes', async () => {
+    const current = { ...fixture, es_published: false, patreon_published: false };
+    const script = { id: 22, name: 'pitch.funscript', relative_path: 'pitch.funscript', kind: 'script', axis: 'pitch', size: 200, directory_id: 12 };
+    let complete: ((value: Response) => void) | undefined;
+    fetchMock.mockImplementation((url: string, init?: RequestInit) => {
+      if (init?.method === 'PATCH') return new Promise<Response>(resolve => { complete = resolve; });
+      return Promise.resolve(response(url.includes('/preview-matching') ? { work_id: 7, video_asset_id: 9, mode: 'auto', revision: 0, script_asset_ids: {}, issues: [], videos: fixture.assets, scripts: [script], job: null, source_changed: false } : url.endsWith('/preview') ? { job: null, files: [], output_dir: '/output/S025_001', windows_path: 'D:\\previews\\S025_001' } : current));
+    });
+    detail();
+    const pitch = await screen.findByLabelText('Pitch · 俯仰');
+    fireEvent.change(pitch, { target: { value: '22' } });
+    const es = screen.getByRole('button', { name: '标记 ES 已发布' });
+    fireEvent.click(es);
+    expect((es as HTMLButtonElement).disabled).toBe(true);
+    const patreon = screen.getByRole('button', { name: '标记 Patreon 已发布' });
+    expect((patreon as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(es); fireEvent.click(patreon);
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'PATCH')).toHaveLength(1);
+    complete!(response({ ...current, es_published: true }));
+    await screen.findByRole('button', { name: '将 ES 改为待发布' });
+    expect((pitch as HTMLSelectElement).value).toBe('22');
+    expect(screen.getByRole('button', { name: '放弃调整' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '关闭作品详情' }));
+    expect(screen.getByText('有尚未保存的修改')).toBeTruthy();
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it('preserves failed edits and only reports success after the retry writes to the server', async () => {
@@ -108,6 +166,14 @@ describe('host folder capability', () => {
 });
 
 describe('cover and historical data', () => {
+  it('displays both platform states and supports migrated legacy data', () => {
+    const view = render(<PublicationBadges work={{ ...fixture, es_published: false, patreon_published: true }} />);
+    expect(screen.getByText('ES 待发布')).toBeTruthy();
+    expect(screen.getByText('Patreon 已发布')).toBeTruthy();
+    view.rerender(<PublicationBadges work={{ ...fixture, status: 'published' }} />);
+    expect(screen.getByText('ES 已发布')).toBeTruthy();
+    expect(screen.getByText('Patreon 已发布')).toBeTruthy();
+  });
   it('keeps a cover placeholder if an image fails to load', () => {
     render(<Cover work={fixture} />);
     fireEvent.error(screen.getByRole('img'));

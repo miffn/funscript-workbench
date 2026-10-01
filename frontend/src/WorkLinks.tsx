@@ -87,6 +87,7 @@ export function WorkLinkEditor({ work, initialKind, onClose, onSaved }: {
     {confirmClose && <div className="discard-confirm" role="alert"><strong>链接修改尚未保存</strong><p>关闭会放弃本次输入。</p><div><button ref={keepEditing} className="button small" onClick={() => { setConfirmClose(false); initialInput.current?.focus(); }}>继续编辑链接</button><button className="button small" onClick={onClose}>放弃链接修改并关闭</button></div></div>}
     <div className="tag-dialog-body">
       <p className="help-text">链接绑定当前完整编号，保存后扫描或重启不会覆盖。清空输入并保存可移除链接。</p>
+      <p className="help-text">填写并保存 ES 帖子链接会自动标记 ES 已发布；Patreon 状态仍由你单独维护。移除链接不会撤回发布状态。</p>
       {error && <div className="notice error" role="alert"><span>{error}</span>{(conflict || !current) && <button className="button small" disabled={loading} onClick={() => setRetry(value => value + 1)}>{conflict ? '放弃输入并读取最新链接' : '重试读取链接'}</button>}</div>}
       {loading ? <p className="loading-state" role="status"><LoaderCircle className="spin" size={18} />正在读取发布链接</p> : current && <form id="work-links-form" className="work-links-form" onSubmit={event => void save(event)} noValidate>
         {linkTypes.map(({ kind, label, Icon }) => <div className={`work-link-field ${kind === initialKind ? 'chosen' : ''}`} key={kind}>

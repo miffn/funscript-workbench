@@ -27,6 +27,8 @@ class WorkEdit(BaseModel):
     model_config = ConfigDict(extra="forbid")
     title: str | None = Field(default=None, min_length=1, max_length=500)
     status: str | None = None
+    es_published: bool | None = Field(default=None, strict=True)
+    patreon_published: bool | None = Field(default=None, strict=True)
     notes: str | None = Field(default=None, max_length=20000)
 
 
@@ -143,6 +145,9 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
 
     def details(db, work, include_assets=False) -> dict:
         record = dict(work)
+        record['es_published'] = bool(record['es_published'])
+        record['patreon_published'] = bool(record['patreon_published'])
+        record['status'] = 'published' if record['es_published'] and record['patreon_published'] else 'pending'
         metadata = enrich_metadata(json.loads(record["metadata"]))
         record.pop("manual_fields", None)
         record["metadata"] = metadata
@@ -246,8 +251,11 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
     def works(q: str = Query(default="", max_length=300), status: str = "all", issues_only: bool = False,
               tag_id: int | None = Query(default=None, gt=0), untagged_only: str = Query(default="false", pattern="^(true|false)$"),
               page: int = Query(default=1, ge=1), page_size: int = Query(default=24, ge=1, le=100)):
-        if status not in {"all", "pending", "published"}:
-            raise HTTPException(422, "发布状态应为 pending、published 或 all")
+        status_filters = {'pending': '(es_published=0 OR patreon_published=0)',
+                          'published': '(es_published=1 AND patreon_published=1)',
+                          'es_published': 'es_published=1', 'patreon_published': 'patreon_published=1'}
+        if status != 'all' and status not in status_filters:
+            raise HTTPException(422, "发布状态应为 pending、published、es_published、patreon_published 或 all")
         clauses, values = [], []
         if q.strip():
             # Literal search: % and _ in user text are not wildcard operators.
@@ -255,8 +263,7 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
             clauses.append("(script_id LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\' OR EXISTS(SELECT 1 FROM work_tags wt JOIN tags t ON t.id=wt.tag_id WHERE wt.work_id=works.id AND t.name_key LIKE ? ESCAPE '\\'))")
             values.extend([f"%{term}%", f"%{term}%", f"%{term.casefold()}%"])
         if status != "all":
-            clauses.append("status=?")
-            values.append(status)
+            clauses.append(status_filters[status])
         if issues_only:
             clauses.append("EXISTS(SELECT 1 FROM issues WHERE issues.work_id=works.id)")
         if tag_id is not None:
@@ -273,8 +280,10 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
             total = db.execute("SELECT count(*) FROM works" + where, values).fetchone()[0]
             rows = db.execute("SELECT * FROM works" + where + " ORDER BY script_id DESC LIMIT ? OFFSET ?", [*values, page_size, (page - 1) * page_size]).fetchall()
             stats = {"total": db.execute("SELECT count(*) FROM works").fetchone()[0],
-                     "pending": db.execute("SELECT count(*) FROM works WHERE status='pending'").fetchone()[0],
-                     "published": db.execute("SELECT count(*) FROM works WHERE status='published'").fetchone()[0],
+                     "pending": db.execute("SELECT count(*) FROM works WHERE es_published=0 OR patreon_published=0").fetchone()[0],
+                     "published": db.execute("SELECT count(*) FROM works WHERE es_published=1 AND patreon_published=1").fetchone()[0],
+                     "es_published": db.execute("SELECT count(*) FROM works WHERE es_published=1").fetchone()[0],
+                     "patreon_published": db.execute("SELECT count(*) FROM works WHERE patreon_published=1").fetchone()[0],
                      "issues": db.execute("SELECT count(DISTINCT work_id) FROM issues WHERE work_id IS NOT NULL").fetchone()[0]}
             return {"items": [details(db, row) for row in rows], "total": total, "page": page,
                     "page_size": page_size, "stats": stats, "last_scan": last_scan(db)}
@@ -339,14 +348,23 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
             raise HTTPException(422, "作品字段不能为 null")
         if "status" in changes and changes["status"] not in {"pending", "published"}:
             raise HTTPException(422, "发布状态应为 pending 或 published")
+        if 'status' in changes and {'es_published', 'patreon_published'} & changes.keys():
+            raise HTTPException(422, '不能同时填写旧发布状态与平台发布状态')
+        if 'status' in changes:
+            changes['es_published'] = changes['patreon_published'] = changes['status'] == 'published'
         if "title" in changes:
             changes["title"] = changes["title"].strip()
             if not changes["title"]:
                 raise HTTPException(422, "标题不能为空")
         with store.connection() as db:
+            db.execute('BEGIN IMMEDIATE')
             current = require_work(db, work_id)
             if changes:
                 manual_fields = set(json.loads(current["manual_fields"])) | set(changes)
+                if {'es_published', 'patreon_published'} & changes.keys():
+                    es = changes.get('es_published', bool(current['es_published']))
+                    patreon = changes.get('patreon_published', bool(current['patreon_published']))
+                    changes['status'] = 'published' if es and patreon else 'pending'
                 assignments = ",".join(f"{field}=?" for field in changes)
                 db.execute(f"UPDATE works SET {assignments},manual_fields=?,updated_at=? WHERE id=?", [*changes.values(), json.dumps(sorted(manual_fields)), now(), work_id])
             return details(db, require_work(db, work_id), include_assets=True)

@@ -226,10 +226,18 @@ class Scanner:
                 history = db.execute("SELECT * FROM history WHERE script_id=?", (script_id,)).fetchone()
                 metadata = json.loads(history["metadata"]) if history else {}
                 work = db.execute("SELECT * FROM works WHERE script_id=?", (script_id,)).fetchone()
+                historical_published = bool(history and history['status'] == 'published')
+                # An ES post link establishes ES publication independently of Patreon.
+                from .work_links import validate_link, WorkLinksError
+                try:
+                    historical_es = historical_published or bool(validate_link(pick(metadata, 'es_url', *HISTORY_FIELDS['es_url'])))
+                except WorkLinksError:
+                    historical_es = historical_published
                 if work is None:
-                    cursor = db.execute("INSERT INTO works(script_id,title,status,metadata,created_at,updated_at) VALUES(?,?,?,?,?,?)",
+                    cursor = db.execute("INSERT INTO works(script_id,title,status,es_published,patreon_published,metadata,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
                                         (script_id, metadata.get("title") or item["title"],
-                                         history["status"] if history else "pending", json.dumps(metadata, ensure_ascii=False), timestamp, timestamp))
+                                         'published' if historical_es and historical_published else 'pending', historical_es, historical_published,
+                                         json.dumps(metadata, ensure_ascii=False), timestamp, timestamp))
                     work_id = cursor.lastrowid
                 else:
                     work_id = work["id"]
@@ -237,9 +245,11 @@ class Scanner:
                     if target_id is None and history and not history["applied"]:
                         manual = json.loads(work["manual_fields"])
                         merged = {**metadata, **json.loads(work["metadata"])}
-                        db.execute("UPDATE works SET title=?,status=?,metadata=?,updated_at=? WHERE id=?",
+                        es = work['es_published'] if 'status' in manual or 'es_published' in manual else historical_es
+                        patreon = work['patreon_published'] if 'status' in manual or 'patreon_published' in manual else historical_published
+                        db.execute("UPDATE works SET title=?,status=?,es_published=?,patreon_published=?,metadata=?,updated_at=? WHERE id=?",
                                    (work["title"] if "title" in manual else metadata.get("title") or work["title"],
-                                    work["status"] if "status" in manual else history["status"],
+                                    'published' if es and patreon else 'pending', es, patreon,
                                     json.dumps(merged, ensure_ascii=False), timestamp, work_id))
                 affected.add(work_id)
                 if history and target_id is None:
