@@ -64,6 +64,48 @@ it('uses Beijing today, a Monday-to-Sunday grid and shows both platform plans', 
   expect(posts()).toHaveLength(0);
 });
 
+it('shows one work record for both platforms and plans/actual dates on the same day', async () => {
+  works[1] = { ...works[1], es_published: true, patreon_published: true, es_published_date: '2026-10-03', patreon_published_date: '2026-10-03' };
+  renderCalendar(); await ready();
+  const group = screen.getByRole('group', { name: 'S002 2026-10-03 发布记录' });
+  expect(within(group).getAllByText('S002')).toHaveLength(1);
+  expect(within(group).getAllByRole('button')).toHaveLength(4);
+  const daily = screen.getByRole('group', { name: 'S002 当日记录' });
+  expect(within(daily).getAllByText('S002')).toHaveLength(1);
+  expect(within(daily).getAllByRole('button')).toHaveLength(4);
+  const day = screen.getByRole('button', { name: '2026-10-03' }).closest('.calendar-day')!;
+  expect(within(day as HTMLElement).getByText('1 条记录')).toBeTruthy();
+  expect(day.querySelector('.calendar-mobile-count')?.textContent).toBe('1');
+  expect(document.querySelector('.calendar-day-heading > span')?.textContent).toBe('1 条');
+  fireEvent.change(screen.getByLabelText('平台筛选'), { target: { value: 'patreon' } });
+  fireEvent.change(screen.getByLabelText('记录筛选'), { target: { value: 'planned' } });
+  expect(within(screen.getByRole('group', { name: 'S002 当日记录' })).getAllByRole('button')).toHaveLength(1);
+});
+
+it('counts and limits work groups, keeping full child IDs independent', async () => {
+  works[0] = { ...works[0], es_published: true, patreon_published: true, es_published_date: '2026-10-03', patreon_published_date: '2026-10-03' };
+  works[2] = { ...works[2], es_published_date: '2026-10-03', patreon_published_date: '2026-10-03' };
+  works.push(work(4, { script_id: 'S001_001', es_planned_date: '2026-10-03' }));
+  renderCalendar(); await screen.findByRole('group', { name: 'S001 当日记录' });
+  const day = screen.getByRole('button', { name: '2026-10-03' }).closest('.calendar-day')!;
+  expect(day.querySelectorAll('.calendar-event-group')).toHaveLength(3);
+  expect(within(day as HTMLElement).getByRole('button', { name: '另 1 条' })).toBeTruthy();
+  expect(day.querySelector('.calendar-mobile-count')?.textContent).toBe('4');
+  expect(document.querySelectorAll('.calendar-entry-group')).toHaveLength(4);
+  expect(screen.getByRole('group', { name: 'S001 当日记录' })).toBeTruthy();
+  expect(screen.getByRole('group', { name: 'S001_001 当日记录' })).toBeTruthy();
+});
+
+it('moves only the dragged platform from a merged work record', async () => {
+  works[2] = { ...works[2], patreon_published_date: '2026-10-05' };
+  renderCalendar(); await ready();
+  expect(within(screen.getByRole('group', { name: 'S003 2026-10-05 发布记录' })).getAllByRole('button')).toHaveLength(2);
+  dragTo(screen.getByRole('button', { name: 'S003 ES 已发布 2026-10-05' }), '2026-10-08');
+  await screen.findByRole('button', { name: 'S003 ES 已发布 2026-10-08' });
+  expect(works[2].patreon_published_date).toBe('2026-10-05');
+  expect(within(screen.getByRole('group', { name: 'S003 2026-10-05 发布记录' })).getAllByRole('button')).toHaveLength(1);
+});
+
 it('adds an actual publication to the selected day by a keyboard/touch-compatible button', async () => {
   renderCalendar(); await ready(); fireEvent.click(screen.getByRole('button', { name: '2026-10-04' }));
   expect(posts()).toHaveLength(0);
