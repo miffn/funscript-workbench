@@ -91,3 +91,4 @@
 .duration-unknown{border:1px dashed var(--tag-duration-fg);background:var(--surface)}
 .duration-tag-readonly{margin-top:18px;padding:13px 14px;border:1px solid var(--line);border-radius:9px;background:var(--bg)}
 .duration-tag-readonly .help-text{margin-top:9px}.duration-catalog-help{margin:-8px 0 20px}.duration-readonly-label{white-space:nowrap;flex-shrink:0}
+@media(max-width:760px){.nav-item{flex:1 1 auto;min-width:max-content;white-space:nowrap}}

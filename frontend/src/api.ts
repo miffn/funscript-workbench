@@ -21,6 +21,20 @@ export interface Work {
   duration_last_known_seconds?: number | null; duration_last_known_minutes?: number | null;
 }
 export type PublicationPlatform = 'es' | 'patreon';
+export type CalendarMode = 'actual' | 'planned';
+export interface CalendarWork {
+  id: number; script_id: string; title: string; revision: string;
+  es_published: boolean; patreon_published: boolean;
+  es_published_date: string | null; patreon_published_date: string | null;
+  es_planned_date: string | null; patreon_planned_date: string | null;
+}
+export interface CalendarEvent {
+  key: string; work_id: number; script_id: string; title: string;
+  platform: PublicationPlatform; mode: CalendarMode; date: string;
+  published: boolean; revision: string;
+}
+export interface CalendarData { month: string; today: string; events: CalendarEvent[]; works: CalendarWork[] }
+export interface CalendarResult { work: CalendarWork; operation: { id: number; undone: boolean }; message: string }
 export function isPublished(work: Work, platform: PublicationPlatform) { return work[`${platform}_published`] ?? work.status === 'published'; }
 export interface Job { id: number; type: string; status: string; created_at: string; started_at?: string | null; finished_at?: string | null; progress?: number; message?: string; result?: Record<string, unknown> | null; error?: string | null }
 export type PreviewAxis = 'stroke' | 'surge' | 'sway' | 'twist' | 'roll' | 'pitch';

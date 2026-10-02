@@ -25,6 +25,7 @@ from .work_links import WorkLinks, WorkLinksError
 from .release_dates import RELEASE_DATE_FIELDS, validate_release_date
 from .profile import register_profile_routes
 from .es_posts import register_es_post_routes
+from .release_calendar import register_release_calendar_routes
 
 
 ReleaseDate = Annotated[str | None, BeforeValidator(validate_release_date)]
@@ -145,6 +146,7 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
     app.state.tags = tags
     register_profile_routes(app, store)
     register_es_post_routes(app, store, config, worker.previews)
+    register_release_calendar_routes(app, store)
 
     @app.middleware("http")
     async def same_origin(request: Request, call_next):

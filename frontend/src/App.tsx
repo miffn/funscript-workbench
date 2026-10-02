@@ -1,23 +1,24 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Archive, ArrowLeft, ArrowRight, Check, CheckCheck, ChevronRight, CircleAlert, Clock3, FileText, Film, LayoutGrid, List, LoaderCircle, Moon, RefreshCw, Search, Settings2, SlidersHorizontal, Sun, Tag as TagIcon, X } from 'lucide-react';
+import { Archive, ArrowLeft, ArrowRight, Check, CheckCheck, CalendarDays, ChevronRight, CircleAlert, Clock3, FileText, Film, LayoutGrid, List, LoaderCircle, Moon, RefreshCw, Search, Settings2, SlidersHorizontal, Sun, Tag as TagIcon, X } from 'lucide-react';
 import { errorMessage, formatDate, isActiveJob, request } from './api';
 import type { Capabilities, Filter, Inventory, Job, Work, WorkLinkKind, WorkLinks, WorkTags } from './api';
 import { WorkLinkButtons, WorkLinkEditor } from './WorkLinks';
 import { ReleaseDates, workDisplayTitle } from './ReleaseDates';
 import { ProfileSettings } from './ProfileSettings';
 import { EsTemplateSettings } from './ReleasePosts';
+import { ReleaseCalendar } from './ReleaseCalendar';
 import type { ProfileData } from './ProfileSettings';
 import { TagChips, TagsPage, WorkTagEditor, useTagCatalog, tagCategories } from './Tags';
 import { Cover, EmptyState, Loading, WorkDetail, IssuesPage, JobsPage, SettingsPage, PublicationBadges } from './components';
 
-type Page = 'inventory' | 'issues' | 'jobs' | 'settings' | 'tags';
+type Page = 'inventory' | 'issues' | 'jobs' | 'settings' | 'tags' | 'calendar';
 export type Notice = { kind: 'success' | 'error' | 'info'; message: string };
 const EMPTY_STATS = { total: 0, pending: 0, published: 0, es_published: 0, patreon_published: 0, issues: 0 };
 const PAGE_SIZE = 24;
 function routeFromHash(hash: string): { page: Page; filter: Filter } {
   const route = hash.replace(/^#\/?/, '');
   if (route === 'pending' || route === 'published' || route === 'es_published' || route === 'patreon_published') return { page: 'inventory', filter: route };
-  if (route === 'issues' || route === 'jobs' || route === 'settings' || route === 'tags') return { page: route, filter: 'all' };
+  if (route === 'issues' || route === 'jobs' || route === 'settings' || route === 'tags' || route === 'calendar') return { page: route, filter: 'all' };
   return { page: 'inventory', filter: 'all' };
 }
 
@@ -163,8 +164,8 @@ export default function App() {
     window.location.hash = `/${route}`;
     setPage(target); setFilter(nextFilter); setNumber(1); setIssuesOnly(false);
   };
-  const title = page === 'inventory' ? filter === 'pending' ? '待发布库存' : filter === 'es_published' ? 'ES 已发布作品' : filter === 'patreon_published' ? 'Patreon 已发布作品' : filter === 'published' ? '全部平台已发布作品' : '脚本库存' : page === 'issues' ? '待处理' : page === 'jobs' ? '任务记录' : page === 'tags' ? '标签管理' : '工作台设置';
-  const subtitle = page === 'inventory' ? '每一个编号，都有自己的素材与发布进展。' : page === 'issues' ? '查看编号冲突、缺失素材和历史资料的关联问题。' : page === 'jobs' ? '库存扫描与预览生成的执行进度、结果和失败原因。' : page === 'tags' ? '统一维护作者与分类，作品绑定标签后复用资料。' : '当前扫描目录与工作台的运行规则。';
+  const title = page === 'inventory' ? filter === 'pending' ? '待发布库存' : filter === 'es_published' ? 'ES 已发布作品' : filter === 'patreon_published' ? 'Patreon 已发布作品' : filter === 'published' ? '全部平台已发布作品' : '脚本库存' : page === 'issues' ? '待处理' : page === 'jobs' ? '任务记录' : page === 'tags' ? '标签管理' : page === 'calendar' ? '发布日历' : '工作台设置';
+  const subtitle = page === 'inventory' ? '每一个编号，都有自己的素材与发布进展。' : page === 'issues' ? '查看编号冲突、缺失素材和历史资料的关联问题。' : page === 'jobs' ? '库存扫描与预览生成的执行进度、结果和失败原因。' : page === 'tags' ? '统一维护作者与分类，作品绑定标签后复用资料。' : page === 'calendar' ? '安排发布计划，记录 ES 与 Patreon 的实际发布日期。' : '当前扫描目录与工作台的运行规则。';
   const totalPages = Math.max(1, Math.ceil((inventory?.total || 0) / PAGE_SIZE));
   const tagsSaved = (value: WorkTags) => {
     setInventory(previous => previous ? { ...previous, items: previous.items.map(work => work.id === value.work_id ? { ...work, tags: value.tags, tags_revision: value.tags_revision } : work) } : previous);
@@ -182,6 +183,7 @@ export default function App() {
       <div className="nav-section"><p className="section-label">作品库</p><nav className="nav-list">
         <button className={page === 'inventory' && filter === 'all' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('inventory')} aria-current={page === 'inventory' && filter === 'all' ? 'page' : undefined}><LayoutGrid size={18} /><span>全部库存</span>{inventory && <span className="nav-count">{stats.total}</span>}</button>
         <button className={page === 'inventory' && filter === 'pending' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('inventory', 'pending')} aria-current={page === 'inventory' && filter === 'pending' ? 'page' : undefined}><Clock3 size={18} /><span>待发布</span>{inventory && <span className="nav-count">{stats.pending}</span>}</button>
+        <button className={page === 'calendar' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('calendar')} aria-current={page === 'calendar' ? 'page' : undefined}><CalendarDays size={18} /><span>发布日历</span></button>
         {(['es_published', 'patreon_published'] as const).map(platformFilter => <button key={platformFilter} className={page === 'inventory' && filter === platformFilter ? 'nav-item active' : 'nav-item'} onClick={() => navigate('inventory', platformFilter)} aria-current={page === 'inventory' && filter === platformFilter ? 'page' : undefined}><CheckCheck size={18} /><span>{platformFilter === 'es_published' ? 'ES 已发布' : 'Patreon 已发布'}</span>{inventory && <span className="nav-count">{stats[platformFilter] ?? stats.published}</span>}</button>)}
       </nav></div>
       <div className="nav-section"><p className="section-label">工作流</p><nav className="nav-list">
@@ -208,6 +210,7 @@ export default function App() {
         </div>}
         {!!inventory?.total && <div className="pagination"><span>第 {Math.min(number, totalPages)} / {totalPages} 页 · 每页 {PAGE_SIZE} 个</span><div><button className="icon-button" aria-label="上一页" onClick={() => { setNumber(value => value - 1); window.scrollTo({ top: 0, behavior: 'auto' }); }} disabled={number <= 1 || loading}><ArrowLeft size={17} /></button><span aria-live="polite">{number}</span><button className="icon-button" aria-label="下一页" onClick={() => { setNumber(value => value + 1); window.scrollTo({ top: 0, behavior: 'auto' }); }} disabled={number >= totalPages || loading}><ArrowRight size={17} /></button></div></div>}
       </>}
+      {page === 'calendar' && <ReleaseCalendar revision={revision} onSelect={setSelected} onChanged={() => setRevision(value => value + 1)} />}
       {page === 'issues' && <IssuesPage revision={revision} onSelect={setSelected} />}
       {page === 'jobs' && <JobsPage revision={revision} />}
       {page === 'settings' && <>{profileLoading ? <p className="loading-state" role="status">正在读取工作台资料…</p> : profileError ? <div className="notice error" role="alert"><span>{profileError}</span><button className="button small" onClick={() => setProfileRetry(value => value + 1)}>重试读取资料</button></div> : <ProfileSettings profile={profile} onSaved={value => { setProfile(value); notify({ kind: 'success', message: '工作台资料已保存' }); }} />}<EsTemplateSettings /><SettingsPage capabilities={capabilities} revision={revision} /></>}
