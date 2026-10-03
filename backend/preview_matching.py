@@ -7,6 +7,7 @@ from pathlib import Path
 from preview_generator.scripts import AXES, ScriptError, discover_scripts, load_script
 
 from .previews import PreviewError, no_symlinks
+from .work_directory import current_directory
 
 
 class PreviewMatching:
@@ -15,7 +16,8 @@ class PreviewMatching:
         self.store = previews.store
 
     def assets(self, db, work_id):
-        return [dict(row) for row in db.execute("SELECT a.*,d.path,d.root_path,d.available FROM assets a JOIN directories d ON d.id=a.directory_id WHERE d.work_id=? AND a.kind IN ('video','script') ORDER BY a.name COLLATE NOCASE,a.id", (work_id,))]
+        directory = current_directory(db, work_id)
+        return [dict(row) for row in db.execute("SELECT a.*,d.path,d.root_path,d.available FROM assets a JOIN directories d ON d.id=a.directory_id WHERE d.id=? AND a.kind IN ('video','script') ORDER BY a.name COLLATE NOCASE,a.id", (directory['id'],))] if directory is not None else []
 
     def active(self, db, work_id):
         return db.execute("SELECT id FROM jobs WHERE type IN ('preview','rematch') AND status IN ('queued','running') AND json_extract(inputs,'$.work_id')=? ORDER BY id LIMIT 1", (work_id,)).fetchone()

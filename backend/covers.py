@@ -8,6 +8,7 @@ import subprocess
 from .config import Config
 from .store import Store, now
 from .scan_roots import ScanRoots, ScanRootsError, no_link_components
+from .work_directory import current_directory
 
 
 class CoverGenerator:
@@ -20,7 +21,8 @@ class CoverGenerator:
     def source(self, work_id: int, root_paths: list[str] | None = None) -> Path | None:
         with self.store.connection() as db:
             registered_roots = {str(root.path): root for root in ScanRoots(self.store, self.config).roots(db)}
-            candidates = db.execute("SELECT a.*,d.path,d.root_path FROM assets a JOIN directories d ON d.id=a.directory_id WHERE d.work_id=? AND d.available=1 AND a.kind='video'", (work_id,)).fetchall()
+            directory = current_directory(db, work_id)
+            candidates = db.execute("SELECT a.*,d.path,d.root_path FROM assets a JOIN directories d ON d.id=a.directory_id WHERE d.id=? AND d.available=1 AND a.kind='video'", (directory['id'],)).fetchall() if directory is not None else []
         videos = []
         for row in candidates:
             if row['root_path'] not in registered_roots:
@@ -61,15 +63,18 @@ class CoverGenerator:
             with self.store.connection() as db:
                 latest = db.execute("SELECT value FROM settings WHERE key='last_scan'").fetchone()
                 unavailable = json.loads(latest[0]).get("unavailable_roots", []) if latest else []
-                directories = db.execute("SELECT root_path,available FROM directories WHERE work_id=?", (work_id,)).fetchall()
+                directory = current_directory(db, work_id)
+                if directory is None:
+                    return 'skipped'
+                directories = [directory]
                 registered = {str(root.path) for root in ScanRoots(self.store, self.config).roots(db)}
                 if any(directory['root_path'] not in registered for directory in directories):
                     return 'skipped'
                 directories = [directory for directory in directories if directory['available']]
-                if root_paths is not None and any(directory[0] not in root_paths for directory in directories):
+                if root_paths is not None and any(directory['root_path'] not in root_paths for directory in directories):
                     # An unscanned source is not evidence that its cached cover vanished.
                     return "skipped"
-                if any(directory[0] in unavailable for directory in directories):
+                if any(directory['root_path'] in unavailable for directory in directories):
                     # An unmounted drive is not evidence that a cached cover should disappear.
                     return "skipped"
                 db.execute("DELETE FROM covers WHERE work_id=?", (work_id,))

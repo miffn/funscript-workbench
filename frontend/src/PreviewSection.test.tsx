@@ -286,8 +286,14 @@ describe('file mapping and forced regeneration', () => {
 
   it('rematches only the current work, refreshes discovered assets and retains title and notes drafts', async () => {
     const saved = vi.fn();
+    const author = { id: 1, category: 'author' as const, name: 'Author', support_status: 'unknown' as const, support_url: null, revision: 0, usage_count: 1 };
+    const single = { ...author, id: 2, category: 'axis_type' as const, name: '单轴' };
+    const multi = { ...single, id: 3, name: '多轴' };
+    currentWork = { ...work, axis_type: '单轴', tags: [author, single], tags_revision: 1 };
     render(<WorkDetail id={7} capabilities={local} onClose={vi.fn()} onSaved={saved} notify={vi.fn()} />);
     const notes = await screen.findByLabelText('备注');
+    expect(screen.queryByRole('radio')).toBeNull();
+    expect(screen.getByText('D:\\library\\S025_001')).toBeTruthy();
     const title = screen.getByLabelText('标题');
     fireEvent.change(notes, { target: { value: '没有保存的备注' } });
     fireEvent.change(title, { target: { value: '正在修改的标题' } });
@@ -297,11 +303,17 @@ describe('file mapping and forced regeneration', () => {
     await screen.findByText('正在匹配当前编号');
     expect((screen.getByRole('button', { name: '重新生成预览' }) as HTMLButtonElement).disabled).toBe(true);
     expect(fetchMock.mock.calls.filter(([url, init]) => url === '/api/works/7/rematch' && init?.method === 'POST')).toHaveLength(1);
-    currentWork = { ...work, script_count: 2, assets: [...work.assets!, matchingState.scripts[1]] };
+    currentWork = { ...work, script_count: 2, axis_type: '多轴', tags: [author, multi], tags_revision: 2,
+      directories: [{ ...work.directories[0], id: 13, path: '/archive/S025_001', windows_path: 'D:\\archive\\S025_001' }], assets: [...work.assets!, matchingState.scripts[1]] };
     matchingState = { ...matchingState, source_changed: true, job: { ...matchingState.job!, status: 'completed', message: '文件重新匹配已完成' } };
     await screen.findByText('2 个脚本', {}, { timeout: 3000 });
     expect((title as HTMLInputElement).value).toBe('正在修改的标题');
     expect((notes as HTMLTextAreaElement).value).toBe('没有保存的备注');
+    expect(screen.getByText('D:\\archive\\S025_001')).toBeTruthy();
+    expect(screen.queryByText('D:\\library\\S025_001')).toBeNull();
+    expect(screen.queryByText('轴类型 单轴')).toBeNull();
+    expect(screen.getByText('多轴', { selector: '.tag-chip' })).toBeTruthy();
+    expect(screen.getByText('Author', { selector: '.tag-chip' })).toBeTruthy();
     expect(saved).toHaveBeenCalledOnce();
     expect(postCount).toBe(0);
   });

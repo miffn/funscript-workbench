@@ -174,11 +174,11 @@ def test_duplicate_cover_never_reads_unselected_root(inventory, monkeypatch):
     scanner.scan()
     work_id = table(store, "works")[0]["id"]
     generator = CoverGenerator(store, config)
-    assert generator.source(work_id, [str(config.roots[1].path)]) == second / "video.mp4"
+    assert generator.source(work_id, [str(config.roots[1].path)]) is None
     first.rename(config.roots[0].path / "unselected-disappeared")
     scanner.scan((config.roots[1],))
     assert any(row["type"] == "duplicate_identifier" for row in table(store, "issues"))
-    assert generator.source(work_id, [str(config.roots[1].path)]) == second / "video.mp4"
+    assert generator.source(work_id, [str(config.roots[1].path)]) is None
     (second / "video.mp4").unlink()
     scanner.scan((config.roots[1],))
     with store.connection() as db:
@@ -205,7 +205,7 @@ def test_no_enabled_config_rejects_scan_without_job_and_legacy_job_fallback(inve
     assert {row["script_id"] for row in table(store, "works")} == {"S081"}
 
 
-def test_shared_cover_failure_preserves_unselected_valid_cache(inventory, monkeypatch):
+def test_conflicting_directory_preserves_cover_without_reading_either_source(inventory, monkeypatch):
     config, store, scanner = inventory
     first = folder(config.roots[0], "S080")
     second = folder(config.roots[1], "S080")
@@ -225,11 +225,11 @@ def test_shared_cover_failure_preserves_unselected_valid_cache(inventory, monkey
         raise FileNotFoundError("missing ffmpeg")
 
     monkeypatch.setattr(subprocess, "run", fail)
-    assert generator.generate(work_id, root_paths=[str(config.roots[1].path)]) == "failed"
+    assert generator.generate(work_id, root_paths=[str(config.roots[1].path)]) == "skipped"
     assert table(store, "covers") == before
     assert old_cache.read_bytes() == b"valid-previous-cache"
-    assert all(str(second / "video.mp4") in argv for argv in attempts)
-    assert any(issue["type"] == "cover_failed" for issue in table(store, "issues"))
+    assert attempts == []
+    assert not any(issue["type"] == "cover_failed" for issue in table(store, "issues"))
 
 
 def test_running_scan_restart_preserves_original_root_snapshot(inventory, monkeypatch):

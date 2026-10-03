@@ -4,6 +4,7 @@ import json
 from urllib.parse import urlsplit
 
 from .store import Store
+from .work_directory import current_directory
 
 CATEGORIES = ("author", "video_type", "axis_type", "release_type", "tier", "duration", "custom")
 SINGLE_CATEGORIES = set(CATEGORIES) - {"custom"}
@@ -14,14 +15,25 @@ AXIS_NAMES = {"single-axis": "单轴", "single axis": "单轴", "multi-axis": "�
 
 
 def sync_axis_tag(db, work_id: int, initialize=False):
-    """Classify scanned axes without overwriting any manual tag decision."""
+    """Refresh an existing axis classification from the current source only."""
     state = db.execute("SELECT manual_edited FROM work_tag_state WHERE work_id=?", (work_id,)).fetchone()
     current = db.execute("SELECT t.id,t.name,wt.source FROM tags t JOIN work_tags wt ON wt.tag_id=t.id WHERE wt.work_id=? AND t.category='axis_type'", (work_id,)).fetchone()
-    if current and (initialize or current["source"] != "scan"):
+    if current and initialize:
         return
-    if not initialize and state and state[0]:
+    # An explicit removal stays removed. Editing other categories must not freeze
+    # an existing axis tag, including tags from the historical import/editor.
+    if not initialize and not current and state and state[0]:
         return
-    axes = {row[0] for row in db.execute("SELECT a.axis FROM assets a JOIN directories d ON d.id=a.directory_id WHERE d.work_id=? AND d.available=1 AND a.kind='script' AND a.axis IS NOT NULL", (work_id,))}
+    directory = current_directory(db, work_id)
+    if directory is None and not initialize:
+        return
+    if not initialize and (not directory['available'] or db.execute(
+        "SELECT 1 FROM issues WHERE work_id=? AND type='directory_unreadable'", (work_id,),
+    ).fetchone()):
+        return
+    axes = {row[0] for row in db.execute("SELECT axis FROM assets WHERE directory_id=? AND kind='script' AND axis IS NOT NULL", (directory['id'],))} if directory is not None and directory['available'] else set()
+    if current and not axes:
+        return
     metadata = json.loads(db.execute("SELECT metadata FROM works WHERE id=?", (work_id,)).fetchone()[0])
     historical = metadata.get("axis_type") or metadata.get("Axis Type") or metadata.get("轴类型")
     name = ("多轴" if len(axes) > 1 else "单轴") if axes else historical

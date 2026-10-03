@@ -18,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from .previews import PreviewError
 from .store import now
 from .work_links import WorkLinks, WorkLinksError, validate_link
+from .work_directory import current_directory
 
 
 TOKENS = {'header', 'intro', 'metadata', 'preview', 'heatmaps', 'attachments', 'navigation', 'motion', 'recent', 'footer'}
@@ -209,7 +210,8 @@ class ESPosts:
             reject('库存编号不存在', 404)
         tags = [dict(row) for row in db.execute('SELECT t.* FROM tags t JOIN work_tags wt ON wt.tag_id=t.id WHERE wt.work_id=? ORDER BY t.id', (work_id,))]
         links = WorkLinks(self.store).state(db, work_id)
-        assets = [dict(row) for row in db.execute('SELECT a.*,d.work_id,d.path,d.root_path,d.available FROM assets a JOIN directories d ON d.id=a.directory_id WHERE d.work_id=? ORDER BY a.id', (work_id,))]
+        directory = current_directory(db, work_id)
+        assets = [dict(row) for row in db.execute('SELECT a.*,d.work_id,d.path,d.root_path,d.available FROM assets a JOIN directories d ON d.id=a.directory_id WHERE d.id=? ORDER BY a.id', (directory['id'],))] if directory is not None else []
         return dict(work), tags, links['links'], assets
 
     def sources(self, work_id):

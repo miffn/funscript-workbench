@@ -86,8 +86,15 @@ def test_duplicates_not_double_counted_and_move_keeps_manual_state(inventory):
         scanner.scan()
         duplicate = client.get("/api/works").json()
         assert duplicate["total"] == 1
-        assert len([directory for directory in duplicate["items"][0]["directories"] if directory["available"]]) == 2
+        assert duplicate['items'][0]['directories'] == []
+        assert duplicate['items'][0]['video_count'] == duplicate['items'][0]['script_count'] == 0
+        post_sources = client.get(f"/api/works/{row['id']}/es-post").json()['sources']
+        assert post_sources['videos'] == [] and post_sources['scripts'] == []
         assert any(issue["type"] == "duplicate_identifier" for issue in duplicate["items"][0]["issues"])
+        with store.connection() as db:
+            conflicting_id = db.execute('SELECT id FROM directories WHERE work_id=? LIMIT 1', (row['id'],)).fetchone()[0]
+        # A stale client cannot bypass the conflict by supplying a directory ID.
+        assert client.post(f"/api/works/{row['id']}/open-folder", headers=host_headers(config), json={'directory_id': conflicting_id}).status_code == 409
         duplicate_folder = config.roots[1].path / "S029_copy"
         duplicate_folder.rename(config.roots[1].path / "untracked_copy")
         folder.rename(config.roots[1].path / "S029_moved")
@@ -98,6 +105,48 @@ def test_duplicates_not_double_counted_and_move_keeps_manual_state(inventory):
         assert moved["notes"] == "发布备注"
         assert not any(issue["type"] in {"duplicate_identifier", "directory_missing"} for issue in moved["issues"])
         assert sum(directory["available"] for directory in moved["directories"]) == 1
+        assert len(moved['directories']) == 1
+        assert len(moved['assets']) == 2
+
+
+@pytest.mark.parametrize('axis_source', ['manual', 'import'])
+def test_move_refreshes_axis_and_single_source_without_losing_publication(inventory, axis_source):
+    config, store, scanner = inventory
+    folder = add_work(config.roots[1].path, 'S066')
+    scanner.scan()
+    with TestClient(create_app(config, start_worker=False)) as client:
+        work = client.get('/api/works').json()['items'][0]
+        work_id = work['id']
+        old_id = work['directories'][0]['id']
+        author = client.post('/api/tags', json={'category': 'author', 'name': 'Author'}).json()
+        client.put(f'/api/works/{work_id}/tags', json={'tag_ids': [author['id'], *[t['id'] for t in work['tags']]], 'expected_revision': work['tags_revision']}).raise_for_status()
+        with store.connection() as db:
+            db.execute("UPDATE work_tags SET source=? WHERE work_id=? AND tag_id IN (SELECT id FROM tags WHERE category='axis_type')", (axis_source, work_id))
+        client.patch(f'/api/works/{work_id}/links', json={'links': {'es': 'https://example.test/post', 'patreon': 'https://example.test/patreon'}, 'expected_revision': 0}).raise_for_status()
+        client.patch(f'/api/works/{work_id}', json={'title': '人工标题', 'notes': '备注', 'patreon_published': True, 'es_published_date': '2026-10-01', 'patreon_published_date': '2026-10-02'}).raise_for_status()
+        prior = client.get(f'/api/works/{work_id}').json()
+        moved = config.roots[0].path / 'S066'
+        folder.rename(moved)
+        for axis in ('pitch', 'roll', 'twist', 'surge'):
+            (moved / f'main.{axis}.funscript').write_text('{"actions":[]}')
+        scanner.scan(target_id='S066')
+        result = client.get(f'/api/works/{work_id}').json()
+        assert result['axis_type'] == '多轴'
+        assert [(t['category'], t['name']) for t in result['tags'] if t['category'] in {'axis_type', 'author'}] == [('author', 'Author'), ('axis_type', '多轴')]
+        assert result['tags_revision'] > prior['tags_revision']
+        assert len(result['directories']) == 1 and result['directories'][0]['path'] == str(moved)
+        assert result['video_count'] == 1 and result['script_count'] == 5
+        assert len(result['assets']) == 6
+        post_sources = client.get(f'/api/works/{work_id}/es-post').json()['sources']
+        assert len(post_sources['videos']) == 1 and len(post_sources['scripts']) == 5
+        assert all(asset['directory_id'] == result['directories'][0]['id'] for asset in post_sources['videos'] + post_sources['scripts'])
+        for field in ('title', 'notes', 'links', 'links_revision', 'es_published', 'patreon_published', 'es_published_date', 'patreon_published_date'):
+            assert result[field] == prior[field]
+        assert client.post(f'/api/works/{work_id}/open-folder', headers=host_headers(config), json={'directory_id': old_id}).status_code == 404
+        assert client.post(f'/api/works/{work_id}/open-folder', headers=host_headers(config)).status_code == 200
+    with TestClient(create_app(config, start_worker=False)) as client:
+        restarted = client.get(f'/api/works/{work_id}').json()
+        assert restarted['axis_type'] == '多轴' and len(restarted['directories']) == 1
 
 
 def test_unavailable_root_preserves_assets_and_excludes_missing_claims(inventory):

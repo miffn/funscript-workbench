@@ -250,7 +250,8 @@ def test_confirmed_vanished_directory_is_not_counted_as_current_source(durations
     second = add_videos(durations, folder='S070_second', names=('b.mp4',))
     values.update({'a.mp4': 60, 'b.mp4': 120})
     scanner.scan()
-    assert state(store)['duration_minutes'] == 3
+    assert state(store)['duration_minutes'] is None
+    assert '目录冲突' in state(store)['duration_error']
     second.rename(second.parent / 'other-unidentified')
     scanner.scan()
     current = state(store)
@@ -280,7 +281,7 @@ def test_moved_workspace_to_archive_is_ready_and_never_double_counted(durations,
 
 
 @pytest.mark.parametrize('removed', [False, True])
-def test_uncertain_root_cannot_hide_part_of_current_total(durations, tmp_path, removed):
+def test_uncertain_conflicting_root_cannot_establish_single_binding(durations, tmp_path, removed):
     config, store, _, values, _ = durations
     add_videos(durations, names=('a.mp4',))
     archive = tmp_path / '2026'
@@ -292,7 +293,8 @@ def test_uncertain_root_cannot_hide_part_of_current_total(durations, tmp_path, r
     scanner = Scanner(store, config)
     values.update({'a.mp4': 60, 'b.mp4': 120})
     scanner.scan()
-    assert state(store)['duration_minutes'] == 3
+    assert state(store)['duration_minutes'] is None
+    assert '目录冲突' in state(store)['duration_error']
     if removed:
         with store.connection() as db:
             catalog = json.loads(db.execute("SELECT value FROM settings WHERE key='root_catalog'").fetchone()[0])
@@ -305,13 +307,13 @@ def test_uncertain_root_cannot_hide_part_of_current_total(durations, tmp_path, r
         scanner.scan()
     current = state(store)
     assert current['duration_status'] == 'partial' and current['duration_minutes'] is None
-    assert current['duration_last_known_minutes'] == 3
+    assert current['duration_last_known_minutes'] is None
+    assert '目录冲突' in current['duration_error']
     assert not any(tag['category'] == 'duration' for tag in current['tags'])
 
 
 def test_unreadable_current_directory_without_video_records_blocks_accurate_sum(durations, monkeypatch):
     _, store, scanner, values, _ = durations
-    add_videos(durations, folder='S070_readable', names=('a.mp4',))
     unreadable = add_videos(durations, folder='S070_unreadable', names=())
     values['a.mp4'] = 60
     original_walk = os.walk

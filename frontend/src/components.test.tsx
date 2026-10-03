@@ -148,20 +148,17 @@ describe('host folder capability', () => {
     expect(fetchMock.mock.calls.filter(([url]) => url === '/api/works/7')).toHaveLength(1);
   });
 
-  it('requires an explicit directory choice for conflicting paths and sends only the selected ID', async () => {
-    const duplicate = { ...fixture, directories: [...fixture.directories, { ...fixture.directories[0], id: 18, windows_path: 'D:\\workspace\\S025_001' }] };
+  it('blocks folder opening for conflicting paths without offering multiple bindings', async () => {
+    const duplicate = { ...fixture, directories: [], issues: [{ type: 'duplicate_identifier', message: '同一编号对应多个文件夹，请处理编号冲突' }] };
     fetchMock.mockResolvedValueOnce(response(duplicate));
     detail();
     await screen.findByLabelText('备注');
     const button = screen.getByRole('button', { name: '打开文件夹' });
     expect((button as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.click(screen.getAllByRole('radio')[1]);
-    expect((button as HTMLButtonElement).disabled).toBe(false);
-    fetchMock.mockResolvedValueOnce(response({ message: '已发送打开请求' }));
+    expect(screen.queryByRole('radio')).toBeNull();
+    expect(screen.getByText('编号存在目录冲突，请处理冲突后重新匹配文件。')).toBeTruthy();
     fireEvent.click(button);
-    await waitFor(() => expect(notify).toHaveBeenCalledWith({ kind: 'success', message: '已发送打开请求' }));
-    const [, init] = fetchMock.mock.calls.find(([url]) => url === '/api/works/7/open-folder')!;
-    expect(JSON.parse(init.body)).toEqual({ directory_id: 18 });
+    expect(fetchMock.mock.calls.some(([url]) => url === '/api/works/7/open-folder')).toBe(false);
   });
 });
 

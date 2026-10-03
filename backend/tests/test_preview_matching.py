@@ -390,7 +390,7 @@ def test_duplicate_full_identifier_blocks_generation_after_rematch(matching):
     with TestClient(app) as client:
         rematch(client, app, store)
         state = get_matching(client, store)
-        assert len(state['videos']) == 2 and state['issues']
+        assert state['videos'] == [] and state['scripts'] == [] and state['issues']
         response = client.post(f'/api/works/{work_id(store)}/preview',
                                json={'video_asset_id': asset_id(store, 'main.mp4')})
         assert response.status_code in {409, 422}

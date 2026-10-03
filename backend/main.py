@@ -26,6 +26,7 @@ from .release_dates import RELEASE_DATE_FIELDS, validate_release_date
 from .profile import register_profile_routes
 from .es_posts import register_es_post_routes
 from .release_calendar import register_release_calendar_routes
+from .work_directory import current_directory
 
 
 ReleaseDate = Annotated[str | None, BeforeValidator(validate_release_date)]
@@ -186,11 +187,12 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
         latest = last_scan(db) or {}
         registered_roots = {str(root.path) for root in scan_roots.roots(db)}
         unavailable_roots = latest.get("unavailable_roots", [])
-        directories = [dict(row) for row in db.execute("SELECT * FROM directories WHERE work_id=? ORDER BY available DESC,id", (record["id"],))]
+        directory = current_directory(db, record['id'])
+        directories = [dict(directory)] if directory is not None else []
         for directory in directories:
             directory["available"] = bool(directory["available"]) and directory["root_path"] not in unavailable_roots and directory['root_path'] in registered_roots
         record["directories"] = directories
-        assets = [dict(row) for row in db.execute("SELECT a.* FROM assets a JOIN directories d ON d.id=a.directory_id WHERE d.work_id=? ORDER BY a.kind,a.relative_path COLLATE NOCASE", (record["id"],))]
+        assets = [dict(row) for row in db.execute("SELECT * FROM assets WHERE directory_id=? ORDER BY kind,relative_path COLLATE NOCASE", (directory['id'],))] if directory is not None else []
         active_ids = {directory["id"] for directory in directories if directory["available"]}
         # Unreachable root keeps prior inventory counts; vanished directory is historical only.
         counted_ids = active_ids | {directory["id"] for directory in directories if directory["root_path"] in unavailable_roots or directory['root_path'] not in registered_roots}
@@ -455,15 +457,12 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
         require_host_origin(request)
         with store.connection() as db:
             require_work(db, work_id)
-            if options and options.directory_id is not None:
-                rows = db.execute("SELECT * FROM directories WHERE work_id=? AND id=?", (work_id, options.directory_id)).fetchall()
-            else:
-                rows = db.execute("SELECT * FROM directories WHERE work_id=? AND available=1", (work_id,)).fetchall()
-            if not rows:
+            directory = current_directory(db, work_id)
+            if directory is None and db.execute('SELECT count(*) FROM directories WHERE work_id=? AND available=1', (work_id,)).fetchone()[0] > 1:
+                raise HTTPException(409, "编号存在目录冲突，请处理冲突后重新匹配文件")
+            if directory is None or (options and options.directory_id is not None and options.directory_id != directory['id']):
                 raise HTTPException(404, "目录不存在或当前不可访问")
-            if len(rows) > 1:
-                raise HTTPException(409, "编号有多个关联目录，请先选择具体路径")
-            windows_path, windows_root = validated_directory(dict(rows[0]), db)
+            windows_path, windows_root = validated_directory(dict(directory), db)
         return send_open_request(windows_path, windows_root)
 
     @app.get("/api/works/{work_id}/preview")

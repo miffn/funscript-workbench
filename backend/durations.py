@@ -9,6 +9,7 @@ import subprocess
 
 from .previews import PreviewError, PreviewService
 from .store import now
+from .work_directory import current_directory
 
 
 def duration_fields(db, work_id: int) -> dict:
@@ -62,7 +63,8 @@ class DurationService:
         # Match inventory counting: a confirmed vanished historical directory in a
         # configured readable root is no longer a current source. An unreachable
         # or removed root is uncertain, so retain those assets and report staleness.
-        rows = db.execute('SELECT * FROM directories WHERE work_id=? ORDER BY id', (work_id,))
+        directory = current_directory(db, work_id)
+        rows = [directory] if directory is not None else []
         return [dict(row) for row in rows if row['available'] or row['root_path'] in unavailable or row['root_path'] not in registered]
 
     def assets(self, db, work_id: int):
@@ -134,8 +136,9 @@ class DurationService:
             assets = self.assets(db, work_id)
             initial_signature = self.signature(db, work_id)
             prior = db.execute('SELECT * FROM work_durations WHERE work_id=?', (work_id,)).fetchone()
+            conflict = db.execute('SELECT count(*) FROM directories WHERE work_id=? AND available=1', (work_id,)).fetchone()[0] > 1
         active = [asset for asset in assets if asset['available']]
-        successes, errors = {}, []
+        successes, errors = {}, ['编号存在目录冲突，请处理冲突后重新匹配文件'] if conflict else []
         for asset in active:
             try:
                 path, seconds = self.cached_duration(asset)
