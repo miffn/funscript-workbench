@@ -5,6 +5,7 @@ import hashlib
 import os
 from pathlib import Path, PureWindowsPath
 import re
+import stat as stat_module
 
 from .config import Config, Root, normalize_id, parse_folder
 from .store import Store, now
@@ -180,7 +181,8 @@ class Scanner:
                 assets = []
                 errors = []
                 try:
-                    directory.resolve().relative_to(root.path.resolve())
+                    directory_resolved = directory.resolve()
+                    directory_resolved.relative_to(root.path.resolve())
                     for parent, folders, filenames in os.walk(directory, followlinks=False, onerror=errors.append):
                         folders[:] = [name for name in folders if not name.startswith('.') and not (Path(parent) / name).is_symlink() and not self.excluded_output(Path(parent) / name)]
                         for filename in sorted(filenames):
@@ -188,9 +190,9 @@ class Scanner:
                             if file.is_symlink():
                                 continue
                             try:
-                                file.resolve().relative_to(directory.resolve())
+                                file.resolve().relative_to(directory_resolved)
                                 stat = file.stat()
-                                if not file.is_file():
+                                if not stat_module.S_ISREG(stat.st_mode):
                                     continue
                                 assets.append({"name": file.name, "relative_path": str(file.relative_to(directory)),
                                                "kind": asset_kind(file), "axis": script_axis(file),
@@ -456,8 +458,13 @@ def existing_path_owner(path, bound_paths):
     if str(path) in bound_paths:
         return bound_paths[str(path)]
     owners = set()
+    spelling = str(path).casefold()
     from .scan_roots import no_link_components, ScanRootsError
     for original, owner in bound_paths.items():
+        # Only case-only spellings can be live aliases. Other moves use the
+        # full code or explicit recovery; do not stat every old path over SMB.
+        if original.casefold() != spelling:
+            continue
         try:
             original = Path(original)
             no_link_components(original)
