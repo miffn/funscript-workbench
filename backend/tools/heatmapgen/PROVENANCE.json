@@ -1,0 +1,31 @@
+{
+  "artifact": "heatmapgen.py",
+  "source": "User-authored heatmapgen source recovered from the local Codex project",
+  "upstream_version": "2026.07.22-ofs-extra-axes",
+  "upstream_sha256": "87d5129407a409f3840d4dca934249c7a264151b7413213dc895cd5f536fca6d",
+  "sha256": "8c6a7dd3442cc3def79e4d2bcf0581805a05f6880a6d30cf36dc8b377b1873a2",
+  "runtime": "Native Python/Pillow in WSL; no Windows executable or interop",
+  "mode": "axes",
+  "report_width": 2048,
+  "report_axes": [
+    "L0",
+    "L1",
+    "L2",
+    "R0",
+    "R1",
+    "R2"
+  ],
+  "speed_resolution": 8192,
+  "port_changes": [
+    "Bundled font resolves relative to the script",
+    "Windows font fallbacks removed",
+    "Unused extra-axis rows hidden to preserve the six-row workbench report"
+  ],
+  "font": {
+    "path": "fonts/NotoSansCJKsc-Regular.otf",
+    "sha256": "2c76254f6fc379fddfce0a7e84fb5385bb135d3e399294f6eeb6680d0365b74b",
+    "license": "SIL Open Font License 1.1",
+    "license_file": "fonts/OFL.txt",
+    "license_source": "https://github.com/notofonts/noto-cjk/blob/main/Sans/LICENSE"
+  }
+}

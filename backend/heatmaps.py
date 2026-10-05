@@ -1,27 +1,26 @@
-"""Run the installed Windows heatmap creator against isolated selected-axis copies.
-
-The original drag entry renders a 2048px axes report, including empty extra axes.
-No generator source or private inventory data is embedded in this adapter.
-"""
+"""Generate full-duration axes reports with bundled Python/Pillow in WSL."""
 from __future__ import annotations
 
-import base64
 import hashlib
 import json
 import math
 import os
 from pathlib import Path
+import signal
 import struct
 import subprocess
+import sys
 import tempfile
 import threading
+import time
 import zlib
 
+from PIL import __version__ as PILLOW_VERSION
 from preview_generator import GenerationCancelled
 from preview_generator.scripts import AXES, load_script
 
-DEFAULT_TOOL = Path(__file__).resolve().parent / 'tools' / 'heatmapcreatorv1.0.exe'
-POWERSHELL = Path('/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe')
+DEFAULT_TOOL = Path(__file__).resolve().parent / 'tools' / 'heatmapgen' / 'heatmapgen.py'
+TOOL_TIMEOUT_SECONDS = 120
 
 
 def _check_cancel(event):
@@ -29,90 +28,60 @@ def _check_cancel(event):
         raise GenerationCancelled('热力图生成已取消')
 
 
-def _windows_path(path: Path) -> str:
-    path = path.absolute()
-    if len(path.parts) >= 3 and path.parts[1] == 'mnt' and len(path.parts[2]) == 1:
-        return path.parts[2].upper() + ':\\' + '\\'.join(path.parts[3:])
-    return subprocess.check_output(['wslpath', '-w', str(path)], text=True).strip()
+def renderer_fingerprint(tool_path):
+    tool = Path(tool_path)
+    if not tool.is_file():
+        raise RuntimeError('未找到 WSL 热力图程序，请检查内置源码')
+    if tool.suffix.lower() != '.py':
+        raise RuntimeError('热力图需要 Python 源码程序，不能使用 Windows EXE')
+    font = tool.parent / 'fonts' / 'NotoSansCJKsc-Regular.otf'
+    if tool == DEFAULT_TOOL and not font.is_file():
+        raise RuntimeError('热力图字体资源不可用，请检查内置工具')
+    return {'runtime': 'python-pillow-wsl-v1',
+            'source_sha256': hashlib.sha256(tool.read_bytes()).hexdigest(),
+            'font_sha256': hashlib.sha256(font.read_bytes()).hexdigest() if font.is_file() else None,
+            'pillow_version': PILLOW_VERSION}
 
 
-def _interop_environment() -> dict[str, str]:
-    env = os.environ.copy()
-    current = env.get('WSL_INTEROP')
-    if not current or not Path(current).exists():
-        candidates = [Path('/run/WSL/1_interop'), *sorted(Path('/run/WSL').glob('*_interop'))]
-        for candidate in candidates:
-            if candidate.exists():
-                env['WSL_INTEROP'] = str(candidate)
-                break
-        else:
-            raise RuntimeError('Windows 热力图工具不可用：WSL interop 未启动')
-    return env
+def _stop_process(process):
+    if process.poll() is not None:
+        return
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    try:
+        process.wait(timeout=3)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        process.wait()
 
 
 def _run_tool(tool: Path, inputs: Path, cancel_event=None):
-    """A hidden Windows supervisor owns the executable and kills its whole tree.
-
-    Values are JSON/base64 data, never PowerShell source or shell arguments.
-    Cancellation uses a private marker so the Windows owner can stop the child.
-    """
-    cancel_file = inputs.parent / 'cancel'
-    settings = {'tool': _windows_path(tool), 'inputs': _windows_path(inputs),
-                'cancel': _windows_path(cancel_file)}
-    encoded_settings = base64.b64encode(json.dumps(settings).encode()).decode()
-    source = r'''
-$ErrorActionPreference = 'Stop'
-$settings = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('SETTINGS')) | ConvertFrom-Json
-$info = New-Object Diagnostics.ProcessStartInfo
-$info.FileName = $settings.tool
-$info.Arguments = '"' + $settings.inputs + '"'
-$info.UseShellExecute = $false
-$info.CreateNoWindow = $true
-$info.RedirectStandardInput = $true
-$info.RedirectStandardOutput = $true
-$info.RedirectStandardError = $true
-$process = New-Object Diagnostics.Process
-$process.StartInfo = $info
-[void]$process.Start()
-$process.StandardInput.Close()
-$out = $process.StandardOutput.ReadToEndAsync()
-$err = $process.StandardError.ReadToEndAsync()
-$watch = [Diagnostics.Stopwatch]::StartNew()
-$stopped = $false
-while (!$process.WaitForExit(100)) {
-    if ([IO.File]::Exists($settings.cancel) -or $watch.Elapsed.TotalSeconds -gt 120) {
-        $killer = New-Object Diagnostics.ProcessStartInfo
-        $killer.FileName = "$env:SystemRoot\System32\taskkill.exe"
-        $killer.Arguments = '/PID ' + $process.Id + ' /T /F'
-        $killer.UseShellExecute = $false
-        $killer.CreateNoWindow = $true
-        $killProcess = [Diagnostics.Process]::Start($killer)
-        $killProcess.WaitForExit()
-        $process.WaitForExit()
-        $stopped = $true
-        break
-    }
-}
-[Console]::OutputEncoding = New-Object Text.UTF8Encoding($false)
-[Console]::Write($out.Result)
-[Console]::Error.Write($err.Result)
-if ($stopped) { [Console]::Error.Write('Heatmap execution cancelled or timed out.'); exit 124 }
-exit $process.ExitCode
-'''.replace('SETTINGS', encoded_settings)
-    command = [str(POWERSHELL), '-NoLogo', '-NoProfile', '-NonInteractive',
-               '-EncodedCommand', base64.b64encode(source.encode('utf-16le')).decode()]
-    # Files keep diagnostics bounded in memory and avoid pipe deadlocks.
+    """An isolated Linux process owns the render and its cancellation/timeout."""
+    _check_cancel(cancel_event)
+    command = [sys.executable, '-I', '-u', str(tool), str(inputs), '--mode', 'axes',
+               '--out', str(inputs / 'heatmaps'), '--overwrite',
+               '--speed-resolution', '8192', '--report-width', '2048']
     with tempfile.TemporaryFile() as log:
         process = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=log,
-                                   stderr=subprocess.STDOUT, env=_interop_environment())
-        while True:
-            if cancel_event is not None and cancel_event.is_set():
-                cancel_file.touch(exist_ok=True)
-            try:
-                result = process.wait(timeout=0.1)
-                break
-            except subprocess.TimeoutExpired:
-                continue
+                                   stderr=subprocess.STDOUT, start_new_session=True)
+        started = time.monotonic()
+        try:
+            while True:
+                _check_cancel(cancel_event)
+                if time.monotonic() - started > TOOL_TIMEOUT_SECONDS:
+                    raise RuntimeError('热力图生成超时')
+                try:
+                    result = process.wait(timeout=0.1)
+                    break
+                except subprocess.TimeoutExpired:
+                    continue
+        finally:
+            _stop_process(process)
         _check_cancel(cancel_event)
         if result:
             log.seek(max(0, log.tell() - 3000))
@@ -160,8 +129,7 @@ def generate_heatmap(script_id: str, scripts: dict[str, str], output_dir: Path,
     if isinstance(duration_seconds, bool) or not math.isfinite(duration_seconds) or duration_seconds <= 0:
         raise ValueError('热力图视频时长无效')
     tool = Path(tool_path or DEFAULT_TOOL)
-    if not tool.is_file():
-        raise RuntimeError('未找到 Windows 热力图工具，请检查工具路径')
+    renderer_fingerprint(tool)
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=output_dir, prefix='.heatmap-') as temporary:

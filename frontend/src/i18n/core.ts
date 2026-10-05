@@ -1,5 +1,9 @@
 export const core: Record<string, string> = {
   '界面语言': 'Interface language',
+  '未找到 WSL 热力图程序，请检查内置源码': 'The native WSL heatmap renderer is missing. Check the bundled source.',
+  '热力图需要 Python 源码程序，不能使用 Windows EXE': 'The heatmap renderer must be a Python source file. Windows EXE files are not supported.',
+  '热力图字体资源不可用，请检查内置工具': 'The heatmap font is unavailable. Check the bundled renderer resources.',
+  '热力图生成超时': 'Heatmap generation timed out',
   '制作确认': 'Production confirmation', '待确认制作完成': 'Awaiting completion confirmation',
   '发现脚本不会自动确认完成；请检查当前素材后手动确认。': 'Finding scripts does not confirm completion automatically. Review the current files, then confirm completion.',
   '尚无可用脚本，请添加脚本后扫描或重新匹配文件。': 'No usable scripts yet. Add scripts, then scan or rematch files.',

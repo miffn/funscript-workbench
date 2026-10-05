@@ -5,7 +5,6 @@ from contextlib import asynccontextmanager
 import hmac
 import json
 from pathlib import Path, PureWindowsPath
-import subprocess
 from urllib.parse import urlparse
 from typing import Annotated, Literal
 
@@ -238,16 +237,9 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
             raise HTTPException(403, "目录打开仅允许素材主机网页的同源请求")
 
     def send_open_request(windows_path: str, windows_root: str):
-        if config.open_mode == "gateway":
-            encoded = base64.urlsafe_b64encode(windows_path.encode("utf-8")).decode("ascii")
-            encoded_root = base64.urlsafe_b64encode(windows_root.encode("utf-8")).decode("ascii")
-            return JSONResponse({"message": "已发送打开请求"}, headers={"X-Workbench-Open-Folder": encoded, "X-Workbench-Folder-Root": encoded_root})
-        try:
-            subprocess.Popen(["/mnt/c/Windows/explorer.exe", windows_path], shell=False,
-                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        except OSError as error:
-            raise HTTPException(502, f"无法发送资源管理器打开请求：{error.strerror or error}")
-        return {"message": "已发送打开请求"}
+        encoded = base64.urlsafe_b64encode(windows_path.encode("utf-8")).decode("ascii")
+        encoded_root = base64.urlsafe_b64encode(windows_root.encode("utf-8")).decode("ascii")
+        return JSONResponse({"message": "已发送打开请求"}, headers={"X-Workbench-Open-Folder": encoded, "X-Workbench-Folder-Root": encoded_root})
 
     def validated_directory(directory: dict, db) -> tuple[str, str]:
         if not directory["available"]:

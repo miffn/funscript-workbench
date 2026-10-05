@@ -1,10 +1,10 @@
 # 脚本工作台部署指南
 
-部署方式：Windows 主机保存素材，WSL Ubuntu 24.04 运行 FastAPI、构建后的 React 页面和 SQLite，Windows 网关提供本机及局域网访问。
+部署方式：Windows 主机保存素材，WSL Ubuntu 24.04 运行 FastAPI、构建后的 React 页面和 SQLite。扫描、视频处理、模拟器渲染、GIF 压缩及热力图生成全部在 WSL 中执行；Windows 网关和自启动器仅负责网页入口、局域网转发、WSL 生命周期及资源管理器窗口。
 
 ## 1. 准备环境
 
-- Windows：WSL 2、Ubuntu 24.04、PowerShell 7、Python 3.12；Python 可执行文件路径需要传给网关。
+- Windows：WSL 2、Ubuntu 24.04、PowerShell 7、Python 3.12；Windows Python 仅运行网关，不处理素材，其可执行文件路径需要传给网关。
 - WSL：启用 systemd，安装 Python 3.12、Node.js 22.12 或更新版本、npm、Git、FFmpeg 和 C++ 构建依赖。本项目当前使用 Node.js 24。
 - 端口：WSL 后端 `127.0.0.1:8789`，Windows 本机入口 `127.0.0.1:8788`，局域网入口 `<Windows IPv4>:8787`。
 - 素材目录：部署后在网页设置中添加，可填写 Windows 盘符绝对路径或 WSL 绝对路径；新部署不预设个人素材目录。
@@ -46,7 +46,7 @@ ctest --test-dir preview_generator/build --output-on-failure
 
 检查所添加的素材目录在 WSL 中可读。生成结果默认写入项目的 `data/previews/`，也可通过环境变量指定独立输出目录；该目录需要写权限。预览输出目录不会被作为库存素材扫描。
 
-热力图工具及内置资源已集成在 `backend/tools/heatmapcreatorv1.0.exe`，默认按项目位置定位；预览渲染器源码和模型位于 `preview_generator/`。无需另行准备个人工具目录。WSL 需启用 Windows 程序互操作；后台自动向工具提供所选各轴脚本的临时副本，并跳过等待回车。原素材不会被改写。一次预览任务输出 4 个 WebM、4 个 GIF 和 `热力图.png`。项目移至另一位置后，在新目录重新构建渲染器并重新安装服务；系统依赖仍按上述步骤安装。
+热力图源码集成在 `backend/tools/heatmapgen/heatmapgen.py`，由 WSL 虚拟环境中的 Python 和 Pillow 直接执行。中文字体随项目提供，路径为 `backend/tools/heatmapgen/fonts/NotoSansCJKsc-Regular.otf`，附带 SIL OFL 许可；无需依赖 Windows 字体或个人工具目录。预览渲染器源码和模型位于 `preview_generator/`，FFmpeg、FFprobe 和渲染器均使用 WSL 原生程序，业务后端不需要 Windows 程序互操作。后台自动传入所选各轴脚本的临时副本，无需手动启动工具或等待回车，原素材不会被改写。一次预览任务输出 4 个 WebM、4 个 GIF 和六轴布局的完整时长 `热力图.png`。项目移至另一位置后，在新目录重新构建渲染器并重新安装服务；系统依赖仍按上述步骤安装。
 
 ## 3. 初始化持久化目录
 
@@ -87,14 +87,14 @@ curl --fail http://127.0.0.1:8789/api/health
 | `WORKBENCH_ROOTS_JSON` | `[]`；仅首次初始化导入目录，后续以数据库配置为准 |
 | `WORKBENCH_PREVIEW_OUTPUT_ROOT` | `<项目>/data/previews` |
 | `WORKBENCH_PREVIEW_RENDERER` | `<项目>/preview_generator/build/ofs-preview-renderer` |
-| `WORKBENCH_HEATMAP_TOOL` | `<项目>/backend/tools/heatmapcreatorv1.0.exe`（通常无需覆盖） |
-| `WORKBENCH_OPEN_MODE` | 安装服务时设为 `gateway` |
+| `WORKBENCH_HEATMAP_TOOL` | `<项目>/backend/tools/heatmapgen/heatmapgen.py`（通常无需覆盖） |
+| `WORKBENCH_OPEN_MODE` | `gateway`；后端始终通过 Windows 网关请求打开文件夹 |
 
-Windows 网关跟随后端授权的目录配置打开文件夹，更换素材目录无需修改源码。改变数据目录或密钥位置时，也要给 Windows 网关传入同一密钥文件。
+后端只验证主机权限、同源请求及目录映射，返回经过编码的打开请求；Windows 网关验证授权目录后打开资源管理器。后端不会启动 `explorer.exe` 或其他 Windows 程序。网关跟随后端授权的目录配置打开文件夹，更换素材目录无需修改源码。改变数据目录或密钥位置时，也要给 Windows 网关传入同一密钥文件。
 
 ## 5. 安装 Windows 自启动
 
-自启动通过当前用户的 Windows 计划任务 `ScriptWorkbench` 托管，登录 Windows 后延迟 15 秒启动。启动器保存在 `%ProgramData%\ScriptWorkbench`，启动 WSL 后端、保持 WSL 运行并检查两个网页入口；后端或网关退出后自动重试。关闭 Codex、浏览器或启动命令窗口不影响计划任务。无需保存 Windows 密码，也不要求打开 Codex。
+Windows 自启动适配层不参与扫描或生成任务。自启动通过当前用户的 Windows 计划任务 `ScriptWorkbench` 托管，登录 Windows 后延迟 15 秒启动。启动器保存在 `%ProgramData%\ScriptWorkbench`，启动 WSL 后端、保持 WSL 运行并检查两个网页入口；后端或网关退出后自动重试。关闭 Codex、浏览器或启动命令窗口不影响计划任务。无需保存 Windows 密码，也不要求打开 Codex。
 
 安装前先确认 Windows 可读取 WSL 项目、Windows Python 的实际路径，以及本机局域网 IPv4。以下命令在 Windows PowerShell 中运行，将示例地址和 Python 路径替换为实际值。安装器依赖本机已有的 `C:\Users\<用户名>\.codex\bin\Invoke-WslProject.ps1` 及其 WSL 配置，该执行器作为普通脚本独立工作。
 

@@ -19,9 +19,9 @@ os.environ["WORKBENCH_PREVIEW_OUTPUT_ROOT"] = str(Path(_test_app_data.name) / "p
 
 @pytest.fixture
 def fake_heatmap_tool(tmp_path, monkeypatch):
-    """Service tests isolate the Windows executable; adapter tests cover its protocol."""
+    """Service tests isolate the native renderer; adapter tests cover its protocol."""
     from backend import previews
-    tool = tmp_path / 'heatmap-tool.exe'
+    tool = tmp_path / 'heatmap-tool.py'
     tool.write_bytes(b'test-heatmap-tool')
     def render(script_id, scripts, output_dir, duration_seconds, **kwargs):
         def chunk(kind, payload):

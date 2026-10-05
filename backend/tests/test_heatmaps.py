@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 import struct
 import threading
+import subprocess
+import time
 import zlib
 
 import pytest
@@ -12,12 +14,15 @@ from backend import heatmaps
 from preview_generator import GenerationCancelled
 
 
-def test_bundled_tool_matches_user_selected_build_and_config(monkeypatch):
+def test_bundled_native_source_font_and_config(monkeypatch):
     from backend.config import Config
     monkeypatch.delenv('WORKBENCH_HEATMAP_TOOL', raising=False)
     assert Config.from_environment().heatmap_tool == heatmaps.DEFAULT_TOOL
     provenance = json.loads((heatmaps.DEFAULT_TOOL.parent / 'PROVENANCE.json').read_text())
     assert hashlib.sha256(heatmaps.DEFAULT_TOOL.read_bytes()).hexdigest() == provenance['sha256']
+    font = heatmaps.DEFAULT_TOOL.parent / provenance['font']['path']
+    assert hashlib.sha256(font.read_bytes()).hexdigest() == provenance['font']['sha256']
+    assert 'SIL OPEN FONT LICENSE' in (font.parent / 'OFL.txt').read_text()
 
 
 def test_tool_location_follows_relocated_module(tmp_path):
@@ -28,7 +33,7 @@ def test_tool_location_follows_relocated_module(tmp_path):
     spec = importlib.util.spec_from_file_location('relocated_heatmaps', source)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    assert module.DEFAULT_TOOL == relocated / 'tools' / 'heatmapcreatorv1.0.exe'
+    assert module.DEFAULT_TOOL == relocated / 'tools' / 'heatmapgen' / 'heatmapgen.py'
 
 
 def png(width=2048, height=1002):
@@ -42,7 +47,7 @@ def png(width=2048, height=1002):
 
 @pytest.fixture
 def files(tmp_path):
-    tool = tmp_path / 'creator.exe'
+    tool = tmp_path / 'creator.py'
     tool.write_bytes(b'fake installed tool')
     source = tmp_path / 'original.funscript'
     source.write_text(json.dumps({'actions': [{'at': 0, 'pos': 0}, {'at': 1000, 'pos': 100}],
@@ -168,5 +173,57 @@ def test_missing_tool(files):
         heatmaps.generate_heatmap('S064', {'stroke': str(source)}, output, 10, tool_path=tool.parent / 'missing')
 
 
-def test_drive_path_conversion():
-    assert heatmaps._windows_path(Path('/mnt/d/素材/预览/文件')) == 'D:\\素材\\预览\\文件'
+def test_native_render_works_without_windows_interop_and_keeps_sources(files, monkeypatch):
+    _, source, output = files
+    monkeypatch.delenv('WSL_INTEROP', raising=False)
+    before = source.read_bytes()
+    result = heatmaps.generate_heatmap('S064', {'stroke': str(source), 'pitch': str(source)}, output, 10)
+    assert (result['width'], result['height']) == (2048, 690)
+    from PIL import Image
+    with Image.open(output / '热力图.png') as report:
+        assert report.size == (2048, 690)
+        assert report.getpixel((40, 52)) != report.getpixel((40, 156))
+    assert source.read_bytes() == before
+    assert list(output.iterdir()) == [output / '热力图.png']
+
+
+def test_windows_executable_is_rejected(files):
+    tool, source, output = files
+    exe = tool.with_suffix('.exe')
+    exe.write_bytes(b'old tool')
+    with pytest.raises(RuntimeError, match='Windows EXE'):
+        heatmaps.generate_heatmap('S064', {'stroke': str(source)}, output, 10, tool_path=exe)
+    assert not output.exists()
+
+
+def test_fingerprint_includes_font_changes(files):
+    tool, _, _ = files
+    before = heatmaps.renderer_fingerprint(tool)
+    (tool.parent / 'fonts').mkdir()
+    font = tool.parent / 'fonts/NotoSansCJKsc-Regular.otf'
+    font.write_bytes(b'font one')
+    first = heatmaps.renderer_fingerprint(tool)
+    font.write_bytes(b'font two')
+    second = heatmaps.renderer_fingerprint(tool)
+    assert before != first != second
+
+
+@pytest.mark.parametrize('cancel', [True, False])
+def test_native_process_cancellation_and_timeout_clean_stage(files, monkeypatch, cancel):
+    tool, source, output = files
+    tool.write_text('import time\ntime.sleep(60)\n')
+    event = threading.Event()
+    if cancel:
+        timer = threading.Timer(.15, event.set)
+        timer.start()
+    else:
+        monkeypatch.setattr(heatmaps, 'TOOL_TIMEOUT_SECONDS', .15)
+    started = time.monotonic()
+    try:
+        with pytest.raises(GenerationCancelled if cancel else RuntimeError):
+            heatmaps.generate_heatmap('S064', {'stroke': str(source)}, output, 10, event, tool)
+    finally:
+        if cancel:
+            timer.cancel()
+    assert time.monotonic() - started < 5
+    assert list(output.iterdir()) == []

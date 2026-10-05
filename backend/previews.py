@@ -17,7 +17,7 @@ from preview_generator.scripts import AXES, ScriptError, discover_scripts, load_
 
 from .config import Config, normalize_id
 from .store import Store
-from .heatmaps import generate_heatmap
+from .heatmaps import generate_heatmap, renderer_fingerprint
 from .scan_roots import ScanRoots, windows_path as map_windows_path
 
 
@@ -374,7 +374,7 @@ class PreviewService:
                 raise PreviewError('指定的热力图工具不可用，请检查热力图工具路径')
             heatmap_fingerprint = hashlib.sha256(json.dumps({
                 'scripts': manifest.get('scripts'), 'duration_seconds': manifest.get('video', {}).get('duration_seconds'),
-                'tool_sha256': self._checksum(self.config.heatmap_tool),
+                'renderer': renderer_fingerprint(self.config.heatmap_tool),
                 'adapter_sha256': self._checksum(Path(__file__).with_name('heatmaps.py')),
             }, sort_keys=True).encode()).hexdigest()
             old_heatmap = next((entry for entry in (current or {}).get('outputs', []) if entry.get('filename') == '热力图.png'), None)

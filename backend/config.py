@@ -49,10 +49,10 @@ class Config:
     ffprobe: str = "ffprobe"
     host_key_file: Path | None = None
     frontend_dist: Path = PROJECT_DIR / "frontend" / "dist"
-    open_mode: str = "native"
+    open_mode: str = "gateway"
     preview_output_root: Path = PROJECT_DIR / "data" / "previews"
     preview_renderer: Path = PROJECT_DIR / "preview_generator" / "build" / "ofs-preview-renderer"
-    heatmap_tool: Path = PROJECT_DIR / 'backend' / 'tools' / 'heatmapcreatorv1.0.exe'
+    heatmap_tool: Path = PROJECT_DIR / 'backend' / 'tools' / 'heatmapgen' / 'heatmapgen.py'
 
     @classmethod
     def from_environment(cls) -> "Config":
@@ -73,8 +73,8 @@ class Config:
         return cls(data_dir=data_dir, roots=tuple(roots),
                    ffmpeg=os.environ.get("WORKBENCH_FFMPEG", "ffmpeg"),
                    ffprobe=os.environ.get("WORKBENCH_FFPROBE", "ffprobe"),
-                   open_mode=os.environ.get("WORKBENCH_OPEN_MODE", "native"),
+                   open_mode=os.environ.get("WORKBENCH_OPEN_MODE", "gateway"),
                    preview_output_root=Path(os.environ.get("WORKBENCH_PREVIEW_OUTPUT_ROOT", str(data_dir / "previews"))),
                    preview_renderer=Path(os.environ.get("WORKBENCH_PREVIEW_RENDERER", str(PROJECT_DIR / "preview_generator" / "build" / "ofs-preview-renderer"))),
-                   heatmap_tool=Path(os.environ.get('WORKBENCH_HEATMAP_TOOL', str(PROJECT_DIR / 'backend' / 'tools' / 'heatmapcreatorv1.0.exe'))),
+                   heatmap_tool=Path(os.environ.get('WORKBENCH_HEATMAP_TOOL', str(PROJECT_DIR / 'backend' / 'tools' / 'heatmapgen' / 'heatmapgen.py'))),
                    host_key_file=Path(os.environ.get("WORKBENCH_HOST_KEY_FILE", str(data_dir / "host.key"))))
