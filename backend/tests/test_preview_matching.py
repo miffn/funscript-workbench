@@ -397,7 +397,7 @@ def test_duplicate_full_identifier_blocks_generation_after_rematch(matching):
 
 
 @pytest.mark.parametrize('change', ['rename_script', 'move_directory'])
-def test_manual_missing_binding_survives_rematch_and_database_reopen_without_auto_fallback(matching, change):
+def test_manual_binding_changes_preserve_invalid_selection_or_clear_on_directory_reassociation(matching, change):
     config, store, scanner = matching
     folder = source(config.roots[0].path)
     (folder / 'custom.funscript').write_text(SCRIPT)
@@ -410,14 +410,27 @@ def test_manual_missing_binding_survives_rematch_and_database_reopen_without_aut
         if change == 'rename_script':
             (folder / 'custom.funscript').rename(folder / 'renamed.funscript')
         else:
+            manifest(config.preview_output_root / 'S070', 'old')
             folder.rename(folder.parent / 'S070_moved')
         rematch(client, app, store)
     Store(config.data_dir)
     with TestClient(create_app(config, start_worker=False)) as client:
         state = get_matching(client, store, video)
-        assert state['mode'] == 'manual'
-        assert state['issues']
-        assert state['script_asset_ids'].get('stroke') != asset_id(store, 'main.funscript')
+        if change == 'move_directory':
+            assert state['mode'] == 'auto' and state['source_changed']
+            with store.connection() as db:
+                assert db.execute('SELECT count(*) FROM preview_bindings WHERE work_id=?', (work_id(store),)).fetchone()[0] == 0
+            current = get_matching(client, store)
+            assert current['mode'] == 'auto' and current['source_changed']
+            assert current['video_asset_id'] != video
+            assert current['script_asset_ids']['stroke'] == next(asset['id'] for asset in current['scripts'] if asset['name'] == 'main.funscript')
+            preview = client.get(f'/api/works/{work_id(store)}/preview').json()
+            assert preview['stale'] and len(preview['files']) == 8
+            assert client.get(preview['files'][0]['url']).content.startswith(b'old:')
+        else:
+            assert state['mode'] == 'manual'
+            assert state['issues']
+            assert state['script_asset_ids'].get('stroke') != asset_id(store, 'main.funscript')
         response = client.post(f'/api/works/{work_id(store)}/preview', json={'video_asset_id': video})
         assert response.status_code in {404, 409, 422}
 

@@ -25,6 +25,24 @@ let scrollPosition: number;
 let workError: { id: number; status: number } | null;
 let records: Map<number, Work>;
 
+it('opens and returns from an unnumbered folder work through its stable numeric route', async () => {
+  const existing = records.get(7)!;
+  records.set(7, { ...existing, script_id: null, title: '普通文件夹' });
+  render(<App />);
+  const cardButton = await screen.findByRole('button', { name: '查看 普通文件夹' });
+  const information = cardButton.closest('article')!.querySelector('.work-info')!;
+  expect(within(information as HTMLElement).getAllByText('普通文件夹')).toHaveLength(1);
+  expect(information.querySelector('h2')).toBeNull();
+  fireEvent.click(cardButton);
+  await screen.findByRole('heading', { name: '普通文件夹', level: 1 });
+  expect(window.location.hash).toBe('#/works/7');
+  expect(document.title).toBe('普通文件夹 · Funscript 工作台');
+  expect(screen.queryByText(/^null$/)).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '返回库存' }));
+  await screen.findByRole('button', { name: '查看 普通文件夹' });
+  expect(window.location.hash).toBe('#/inventory');
+});
+
 beforeEach(() => {
   setLanguage({ language: 'zh-CN', revision: 0 });
   localStorage.clear();

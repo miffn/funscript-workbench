@@ -30,6 +30,18 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe('persisted scan directory selection', () => {
+  it('keeps old roots numbered and explicitly persists identification changes independently for each root', async () => {
+    const view = render(<ScanRootsEditor settings={initial} />);
+    expect((screen.getByLabelText('识别方式 2026') as HTMLSelectElement).value).toBe('numbered');
+    expect((screen.getByLabelText('新目录识别方式') as HTMLSelectElement).value).toBe('folder');
+    fireEvent.change(screen.getByLabelText('识别方式 workspace'), { target: { value: 'folder' } });
+    expect(fetchMock).not.toHaveBeenCalled();
+    fireEvent.click(saveButton()); await screen.findByText(/扫描目录已保存/);
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).roots.map((root: { identification: string }) => root.identification)).toEqual(['numbered', 'folder']);
+    view.unmount(); render(<ScanRootsEditor settings={server} />);
+    expect((screen.getByLabelText('识别方式 workspace') as HTMLSelectElement).value).toBe('folder');
+    expect(fetchMock.mock.calls.some(([url]) => url.includes('/scans'))).toBe(false);
+  });
   it('adds and deletes directory configuration, then reads the saved catalog on a fresh mount', async () => {
     const view = render(<ScanRootsEditor settings={initial} />);
     fireEvent.change(screen.getByLabelText('目录路径'), { target: { value: 'E:\\素材' } });
@@ -39,7 +51,7 @@ describe('persisted scan directory selection', () => {
     expect(checkbox('新库存').checked).toBe(true); expect(screen.queryByRole('checkbox', { name: '扫描 2026' })).toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();
     fireEvent.click(saveButton()); await screen.findByText(/扫描目录已保存/);
-    expect(JSON.parse(fetchMock.mock.calls[0][1].body).roots).toEqual([{ path: workspace, label: 'workspace', enabled: true }, { path: 'E:\\素材', label: '新库存', enabled: true }]);
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).roots).toEqual([{ path: workspace, label: 'workspace', enabled: true, identification: 'numbered' }, { path: 'E:\\素材', label: '新库存', enabled: true, identification: 'folder' }]);
     view.unmount(); render(<ScanRootsEditor settings={server} />);
     expect(checkbox('新库存').checked).toBe(true); expect(screen.queryByRole('checkbox', { name: '扫描 2026' })).toBeNull();
     expect(fetchMock.mock.calls.some(([url]) => url.includes('/scans'))).toBe(false);
@@ -86,7 +98,7 @@ describe('persisted scan directory selection', () => {
     expect(fetchMock).toHaveBeenCalledOnce();
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe('/api/settings/scan-roots'); expect(init.method).toBe('PUT');
-    expect(JSON.parse(init.body)).toEqual({ roots: [{ path: year, label: '2026', enabled: true }, { path: workspace, label: 'workspace', enabled: false }], expected_revision: 3 });
+    expect(JSON.parse(init.body)).toEqual({ roots: [{ path: year, label: '2026', enabled: true, identification: 'numbered' }, { path: workspace, label: 'workspace', enabled: false, identification: 'numbered' }], expected_revision: 3 });
     server = { ...server, scan_roots_revision: 4, roots: [server.roots[0], { ...(server.roots[1] as Record<string, unknown>), enabled: false }] };
     await act(async () => { finish!(response(server)); });
     expect(screen.getByText(/扫描目录已保存；尚未执行扫描/)).toBeTruthy();

@@ -3,17 +3,17 @@ import { useI18n, translate } from './i18n';
 import { useEffect, useRef, useState } from 'react';
 import { Check, CircleAlert, Folder, LoaderCircle, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { ApiError, errorMessage, request } from './api';
-import type { Settings } from './api';
+import type { IdentificationMode, Settings } from './api';
 
-interface RootOption { path: string; windowsPath: string; label: string; available: boolean | null; enabled: boolean }
+interface RootOption { path: string; windowsPath: string; label: string; available: boolean | null; enabled: boolean; identification: IdentificationMode }
 function rootOptions(settings: Settings): RootOption[] {
   return settings.roots.map((root, index) => {
-    if (typeof root === 'string') return { path: root, windowsPath: root, label: root.split(/[\\/]/).filter(Boolean).at(-1) || `目录 ${index + 1}`, available: null, enabled: true };
+    if (typeof root === 'string') return { path: root, windowsPath: root, label: root.split(/[\\/]/).filter(Boolean).at(-1) || `目录 ${index + 1}`, available: null, enabled: true, identification: 'numbered' };
     const path = typeof root.path === 'string' ? root.path : '';
-    return { path, windowsPath: typeof root.windows_path === 'string' ? root.windows_path : path, label: typeof root.label === 'string' ? root.label : `目录 ${index + 1}`, available: typeof root.available === 'boolean' ? root.available : null, enabled: root.enabled !== false };
+    return { path, windowsPath: typeof root.windows_path === 'string' ? root.windows_path : path, label: typeof root.label === 'string' ? root.label : `目录 ${index + 1}`, available: typeof root.available === 'boolean' ? root.available : null, enabled: root.enabled !== false, identification: root.identification === 'folder' ? 'folder' : 'numbered' };
   });
 }
-const catalog = (roots: RootOption[]) => roots.map(({ path, label, enabled }) => ({ path, label, enabled }));
+const catalog = (roots: RootOption[]) => roots.map(({ path, label, enabled, identification }) => ({ path, label, enabled, identification }));
 const sameRoots = (left: RootOption[], right: RootOption[]) => JSON.stringify(catalog(left)) === JSON.stringify(catalog(right));
 
 export function ScanRootsEditor({ settings, collapsible = false }: { settings: Settings; collapsible?: boolean }) {
@@ -22,6 +22,7 @@ export function ScanRootsEditor({ settings, collapsible = false }: { settings: S
   const [draft, setDraft] = useState(() => rootOptions(settings));
   const [newPath, setNewPath] = useState('');
   const [newLabel, setNewLabel] = useState('');
+  const [newIdentification, setNewIdentification] = useState<IdentificationMode>('folder');
   const [saving, setSaving] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
@@ -56,7 +57,7 @@ export function ScanRootsEditor({ settings, collapsible = false }: { settings: S
     if (!/^(?:[a-zA-Z]:[\\/]|\/(?!\/))/.test(path)) { setError(translate('请输入 Windows 盘符绝对路径或 WSL 绝对路径。')); return; }
     const comparable = (value: string) => value.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
     if (draft.some(root => [root.path, root.windowsPath].some(value => comparable(value) === comparable(path)))) { setError(translate('该目录已在列表中。')); return; }
-    updateDraft([...draft, { path, windowsPath: path, label: newLabel.trim() || path.split(/[\\/]/).filter(Boolean).at(-1) || path, enabled: true, available: null }]);
+    updateDraft([...draft, { path, windowsPath: path, label: newLabel.trim() || path.split(/[\\/]/).filter(Boolean).at(-1) || path, enabled: true, available: null, identification: newIdentification }]);
     setNewPath(''); setNewLabel('');
   };
   const save = async () => {
@@ -82,9 +83,10 @@ export function ScanRootsEditor({ settings, collapsible = false }: { settings: S
   };
   return <SettingsSection className="scan-roots-editor" headingId="scan-roots-title" title={translate('扫描目录')} icon={<Folder size={19} aria-hidden="true" />} collapsible={collapsible} headingExtra={dirty && <span className="unsaved-label">{translate('未保存')}</span>}>
     <p className="help-text">{translate("添加、删除或勾选下一次手动扫描要读取的目录。取消勾选不会删除已有库存或标签，保存也不会触发扫描。删除目录仅取消扫描配置，原文件与作品资料均保留。")}</p>
-    <fieldset className="scan-root-choices" disabled={saving || refreshing || !editable}><legend className="sr-only">{translate("启用的扫描目录")}</legend>{draft.map(root => <div className={`root-item scan-root-option ${root.enabled ? 'selected' : ''}`} key={root.path}><label className="scan-root-select"><input type="checkbox" checked={root.enabled} onChange={() => toggle(root.path)} aria-label={translate('扫描 {name}', { name: root.label })} /><span className="scan-root-info"><strong>{root.label}</strong><code>{root.windowsPath}</code></span></label><span className={`badge ${root.available === false ? 'warning' : 'neutral'}`}>{root.available === false ? translate('暂不可用') : root.available === true ? translate('可读取') : translate('待保存')}</span><button className="scan-root-remove" onClick={() => updateDraft(draft.filter(value => value.path !== root.path))} aria-label={translate('删除目录 {name}', { name: root.label })} title={translate("只移除配置，不删除文件")}><Trash2 size={18} /></button></div>)}</fieldset>
+    <p className="help-text">{translate("按编号识别完整编号目录；按文件夹识别一级子文件夹，无需编号。改名或迁移后的文件夹请在待处理里确认关联，避免重复建档。")}</p>
+    <fieldset className="scan-root-choices" disabled={saving || refreshing || !editable}><legend className="sr-only">{translate("启用的扫描目录")}</legend>{draft.map(root => <div className={`root-item scan-root-option ${root.enabled ? 'selected' : ''}`} key={root.path}><label className="scan-root-select"><input type="checkbox" checked={root.enabled} onChange={() => toggle(root.path)} aria-label={translate('扫描 {name}', { name: root.label })} /><span className="scan-root-info"><strong>{root.label}</strong><code>{root.windowsPath}</code></span></label><label className="scan-identification"><span>{translate("识别方式")}</span><select aria-label={translate("识别方式 {name}", { name: root.label })} value={root.identification} onChange={event => updateDraft(draft.map(value => value.path === root.path ? { ...value, identification: event.target.value as IdentificationMode } : value))}><option value="numbered">{translate("按编号")}</option><option value="folder">{translate("按文件夹")}</option></select></label><span className={`badge ${root.available === false ? 'warning' : 'neutral'}`}>{root.available === false ? translate('暂不可用') : root.available === true ? translate('可读取') : translate('待保存')}</span><button className="scan-root-remove" onClick={() => updateDraft(draft.filter(value => value.path !== root.path))} aria-label={translate('删除目录 {name}', { name: root.label })} title={translate("只移除配置，不删除文件")}><Trash2 size={18} /></button></div>)}</fieldset>
     {!draft.length && <p className="help-text">{translate("尚未配置扫描目录，请添加素材所在的目录。")}</p>}
-    <form className="scan-root-add" onSubmit={event => { event.preventDefault(); if (!operation.current && editable) add(); }}><label>{translate("目录路径")}<input value={newPath} onChange={event => setNewPath(event.target.value)} placeholder={translate('例如 E:\\\\素材 或 /mnt/e/素材')} disabled={saving || refreshing || !editable} /></label><label>{translate("名称（可选）")}<input value={newLabel} onChange={event => setNewLabel(event.target.value)} placeholder={translate("便于识别的名称")} disabled={saving || refreshing || !editable} /></label><button className="button" type="submit" disabled={!newPath.trim() || saving || refreshing || !editable}><Plus size={16} />{translate("添加目录")}</button></form>
+    <form className="scan-root-add" onSubmit={event => { event.preventDefault(); if (!operation.current && editable) add(); }}><label>{translate("目录路径")}<input value={newPath} onChange={event => setNewPath(event.target.value)} placeholder={translate('例如 E:\\\\素材 或 /mnt/e/素材')} disabled={saving || refreshing || !editable} /></label><label>{translate("名称（可选）")}<input value={newLabel} onChange={event => setNewLabel(event.target.value)} placeholder={translate("便于识别的名称")} disabled={saving || refreshing || !editable} /></label><label>{translate("新目录识别方式")}<select value={newIdentification} onChange={event => setNewIdentification(event.target.value as IdentificationMode)} disabled={saving || refreshing || !editable}><option value="folder">{translate("按文件夹")}</option><option value="numbered">{translate("按编号")}</option></select></label><button className="button" type="submit" disabled={!newPath.trim() || saving || refreshing || !editable}><Plus size={16} />{translate("添加目录")}</button></form>
     {!editable && <p className="help-text">{translate("当前服务尚未提供可保存的目录版本，请更新服务后重试。")}</p>}
     {!draft.some(root => root.enabled) && <p className="help-text">{translate("没有启用目录，立即扫描暂不可用。")}</p>}
     {error && <p className="inline-error scan-root-feedback" role="alert"><CircleAlert size={15} />{translate(error)}</p>}

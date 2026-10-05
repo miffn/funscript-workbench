@@ -74,7 +74,7 @@ def test_add_windows_and_linux_paths_persist_without_environment_readding(catalo
     assert response.status_code == 200
     root = response.json()['roots'][-1]
     assert root == {'path': '/mnt/e/素材/新库存', 'windows_path': 'E:\\素材\\新库存',
-                    'label': '外置盘', 'enabled': True, 'available': False}
+                    'label': '外置盘', 'enabled': True, 'available': False, 'identification': 'folder'}
     fresh = replace(config, roots=(Root(tmp_path / 'other', 'Z:\\other', '不要补回'),))
     with TestClient(create_app(fresh, start_worker=False)) as restarted:
         assert restarted.get('/api/settings').json()['roots'] == response.json()['roots']
@@ -114,7 +114,8 @@ def test_remove_preserves_inventory_manual_fields_links_tags_and_matching_then_r
     assert client.patch(f'/api/works/{work_id}', json={'title': '人工标题', 'notes': '保留备注', 'status': 'published'}).status_code == 200
     tag = client.post('/api/tags', json={'category': 'custom', 'name': '保留'}).json()
     assert client.put(f'/api/works/{work_id}/tags', json={'tag_ids': [tag['id']], 'expected_revision': work['tags_revision']}).status_code == 200
-    assert client.patch(f'/api/works/{work_id}/links', json={'links': {'video': 'https://example.com/video'}, 'expected_revision': 0}).status_code == 200
+    links_revision = client.get(f'/api/works/{work_id}/links').json()['links_revision']
+    assert client.patch(f'/api/works/{work_id}/links', json={'links': {'video': 'https://example.com/video'}, 'expected_revision': links_revision}).status_code == 200
     service = PreviewService(store, config)
     inputs = service.select_inputs(work_id)
     before = {table: rows(store, table) for table in ('works', 'assets', 'work_tags', 'work_tag_state', 'work_links', 'preview_bindings')}

@@ -2,7 +2,7 @@ import { getLanguage, translate as t } from './i18n';
 
 export type Status = 'pending' | 'published';
 export type Filter = 'all' | Status | 'to_make' | 'es_published' | 'patreon_published';
-export interface Issue { type: string; message: string; script_id?: string; work_id?: number | null; paths?: string[] }
+export interface Issue { type: string; message: string; script_id?: string | null; work_id?: number | null; paths?: string[] }
 export interface Directory { id: number; windows_path: string; path: string; available: boolean }
 export interface Asset { id: number; name: string; relative_path: string; kind: string; axis?: string | null; size: number; directory_id: number }
 export type TagCategory = 'author' | 'video_type' | 'axis_type' | 'release_type' | 'tier' | 'duration' | 'custom';
@@ -13,10 +13,12 @@ export type WorkLinkValues = Record<WorkLinkKind, string>;
 export interface WorkLinks { work_id: number; links: WorkLinkValues; links_revision: number; es_published_date?: string | null; patreon_published_date?: string | null }
 export interface TagCatalog { items: Tag[]; categories: string[]; import_report?: Record<string, unknown> | null }
 export interface Work {
-  id: number; script_id: string; title: string; status: Status; video_type?: string | null; axis_type?: string | null;
+  id: number; script_id: string | null; title: string; status: Status; video_type?: string | null; axis_type?: string | null;
   video_count: number; script_count: number; cover_url: string | null; issues: Issue[]; directories: Directory[];
   updated_at: string; notes?: string; assets?: Asset[]; metadata?: Record<string, unknown>; tags?: Tag[]; tags_revision?: number;
   production_required?: boolean; production_confirmed_at?: string | null; production_revision?: number;
+  association_status?: 'available' | 'missing' | 'unavailable' | 'conflict' | 'unlinked'; association_revision?: number;
+  preview_key?: string | null; preview_stale?: boolean;
   links?: WorkLinkValues; links_revision?: number;
   es_published?: boolean; patreon_published?: boolean;
   es_published_date?: string | null; patreon_published_date?: string | null;
@@ -26,24 +28,31 @@ export interface Work {
 export type PublicationPlatform = 'es' | 'patreon';
 export type CalendarMode = 'actual' | 'planned';
 export interface CalendarWork {
-  id: number; script_id: string; title: string; revision: string;
+  id: number; script_id: string | null; title: string; revision: string;
   es_published: boolean; patreon_published: boolean;
   es_published_date: string | null; patreon_published_date: string | null;
   es_planned_date: string | null; patreon_planned_date: string | null;
 }
 export interface CalendarEvent {
-  key: string; work_id: number; script_id: string; title: string;
+  key: string; work_id: number; script_id: string | null; title: string;
   platform: PublicationPlatform; mode: CalendarMode; date: string;
   published: boolean; revision: string;
 }
 export interface CalendarData { month: string; today: string; events: CalendarEvent[]; works: CalendarWork[] }
 export interface CalendarResult { work: CalendarWork; operation: { id: number; undone: boolean }; message: string }
+export function workIdentity(work: { id?: number; work_id?: number | null; script_id?: string | null; title?: string | null }) {
+  return work.script_id?.trim() || work.title?.trim() || `work-${work.id ?? work.work_id ?? 'unknown'}`;
+}
 export function isPublished(work: Work, platform: PublicationPlatform) { return work[`${platform}_published`] ?? work.status === 'published'; }
-export interface Job { id: number; type: string; status: string; created_at: string; started_at?: string | null; finished_at?: string | null; progress?: number; message?: string; result?: Record<string, unknown> | null; error?: string | null }
+export interface Job { id: number; type: string; status: string; created_at: string; started_at?: string | null; finished_at?: string | null; progress?: number; message?: string; result?: Record<string, unknown> | null; inputs?: Record<string, unknown>; error?: string | null }
 export type PreviewAxis = 'stroke' | 'surge' | 'sway' | 'twist' | 'roll' | 'pitch';
 export interface PreviewMatching { work_id: number; video_asset_id: number | null; mode: 'auto' | 'manual'; revision: number; script_asset_ids: Partial<Record<PreviewAxis, number>>; issues: string[]; videos: Asset[]; scripts: Asset[]; job: Job | null; source_changed: boolean }
 export interface PreviewFile { filename: string; kind: 'video' | 'gif' | 'heatmap'; clip_index: number; width: number; height: number; url: string; size: number }
-export interface PreviewState { job: Job | null; files: PreviewFile[]; output_dir: string; windows_path: string; error?: string | null }
+export interface PreviewState { job: Job | null; files: PreviewFile[]; output_dir: string; windows_path: string; error?: string | null; preview_key?: string; stale?: boolean }
+export type IdentificationMode = 'numbered' | 'folder';
+export interface ScanCandidate { id: number; name: string; script_id?: string | null; path: string; windows_path: string; root_path: string; available: boolean; revision: number; missing_work_ids: number[]; video_count: number; script_count: number }
+export interface CandidateWork { id: number; script_id: string | null; title: string; association_revision: number }
+export interface ScanCandidates { items: ScanCandidate[]; works: CandidateWork[]; total: number }
 export interface Inventory { items: Work[]; total: number; page: number; page_size: number; stats: { total: number; pending: number; to_make?: number; published: number; es_published?: number; patreon_published?: number; issues: number }; last_scan: { at: string; [key: string]: unknown } | null }
 export interface Capabilities { can_open_folder: boolean; reason: string }
 export interface Settings { roots: (string | Record<string, unknown>)[]; scan_interval_seconds: number; scan_roots_revision?: number; [key: string]: unknown }

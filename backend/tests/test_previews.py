@@ -98,6 +98,86 @@ def fake_generate(config, on_progress=None, cancel_event=None):
     return manifest
 
 
+def test_unnumbered_preview_uses_stable_key_and_regeneration_clears_stale(previews, monkeypatch):
+    config, store, scanner = previews
+    folder, _ = source(config.roots[0].path)
+    originals = {path: path.read_bytes() for path in folder.iterdir()}
+    scanner.scan()
+    work = first_work(store)
+    with store.connection() as db:
+        db.execute('UPDATE works SET script_id=NULL,preview_stale=1 WHERE id=?', (work['id'],))
+    service = PreviewService(store, config)
+    before = service.state(work['id'])
+    assert before['preview_key'] == f"work-{work['id']}" and before['stale']
+    with store.connection() as db:
+        assert db.execute('SELECT preview_key FROM works WHERE id=?', (work['id'],)).fetchone()[0] is None
+    inputs = service.select_inputs(work['id'])
+    assert inputs['script_id'] is None and inputs['preview_key'] == before['preview_key']
+    monkeypatch.setattr(preview_module, 'generate', fake_generate)
+    result = service.generate(inputs, None, threading.Event())
+    assert result['work_id'] == before['preview_key'] and result['script_id'] is None
+    assert result['workbench_work_id'] == work['id']
+    state = PreviewService(Store(config.data_dir), config).state(work['id'])
+    assert len(state['files']) == 9 and not state['stale']
+    assert Path(state['output_dir']).name == before['preview_key']
+    with store.connection() as db:
+        db.execute("UPDATE works SET script_id='S071',preview_stale=1 WHERE id=?", (work['id'],))
+    rebound = service.state(work['id'])
+    assert rebound['stale'] and len(rebound['files']) == 9
+    assert rebound['output_dir'] == state['output_dir']
+    with pytest.raises(PreviewError, match='排队期间变化'):
+        service.generate(inputs, None, threading.Event())
+    service.generate(service.select_inputs(work['id']), None, threading.Event())
+    assert not service.state(work['id'])['stale']
+    assert all(path.read_bytes() == content for path, content in originals.items())
+
+
+def test_legacy_preview_remains_readable_after_rebind_and_reserved_code_cannot_share_output(previews):
+    config, store, scanner = previews
+    source(config.roots[0].path)
+    scanner.scan()
+    work = first_work(store)
+    make_manifest(config.preview_output_root / 'S070')
+    with store.connection() as db:
+        db.execute('UPDATE works SET preview_key=script_id,script_id=NULL,preview_stale=1 WHERE id=?', (work['id'],))
+        other = db.execute('INSERT INTO works(script_id,title,created_at,updated_at) VALUES(?,?,?,?)',
+                           ('S070', 'New code owner', now(), now())).lastrowid
+    service = PreviewService(store, config)
+    state = service.state(work['id'])
+    assert state['preview_key'] == 'S070' and state['stale'] and len(state['files']) == 8
+    assert service.media_path(work['id'], '预览视频1.webm').read_bytes().startswith(b'S070:')
+    assert service.state(other)['preview_key'] == f'work-{other}'
+    assert service.matching.state(work['id'])['source_changed']
+    with store.connection() as db:
+        db.execute("UPDATE works SET preview_key='../outside' WHERE id=?", (other,))
+    with pytest.raises(PreviewError, match='预览存储标识无效'):
+        service.state(other)
+
+
+@pytest.mark.parametrize('change', ['code', 'association'])
+def test_rebind_during_generation_never_publishes_new_result_or_clears_stale(previews, monkeypatch, change):
+    config, store, scanner = previews
+    source(config.roots[0].path)
+    scanner.scan()
+    work = first_work(store)
+    output = config.preview_output_root / 'S070'
+    make_manifest(output)
+    old = {path: path.read_bytes() for path in output.iterdir()}
+    service = PreviewService(store, config)
+    inputs = service.select_inputs(work['id'])
+    def generate_and_rebind(generator_config, **kwargs):
+        result = fake_generate(generator_config, **kwargs)
+        with store.connection() as db:
+            assignment = "script_id='S072'" if change == 'code' else 'association_revision=association_revision+1'
+            db.execute(f"UPDATE works SET {assignment},preview_stale=1 WHERE id=?", (work['id'],))
+        return result
+    monkeypatch.setattr(preview_module, 'generate', generate_and_rebind)
+    with pytest.raises(PreviewError, match='关联发生变化'):
+        service.generate(inputs, None, threading.Event())
+    assert all(path.read_bytes() == content for path, content in old.items())
+    assert service.state(work['id'])['stale']
+
+
 def test_preview_api_generate_persists_and_serves_fixed_media(previews, monkeypatch):
     config, store, scanner = previews
     folder, video = source(config.roots[0].path)

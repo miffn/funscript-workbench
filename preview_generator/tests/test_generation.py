@@ -64,6 +64,14 @@ def test_real_offscreen_multiaxis_four_pairs_audio_and_reuse(config):
     assert not list(Path(config.cache_dir).iterdir())
 
 
+def test_stable_unnumbered_key_generates_without_modifying_source(config):
+    original = {path: path.read_bytes() for path in config.video.parent.iterdir()}
+    result = generate(replace(config, work_id='work-42', percentages=(.2,)))
+    assert result['status'] == 'completed' and result['work_id'] == 'work-42'
+    assert len(result['outputs']) == 2
+    assert all(path.read_bytes() == content for path, content in original.items())
+
+
 def test_failed_reencode_preserves_prior_success_and_records_failure(config, tmp_path):
     good = generate(replace(config, percentages=(.2,)))
     originals = {Path(item["path"]): item["sha256"] for item in good["outputs"]}
@@ -106,9 +114,10 @@ def test_existing_lock_prevents_simultaneous_writes(config):
     assert (output / ".preview-generator.lock").is_file()
 
 
-def test_source_folder_is_not_valid_output(config):
+@pytest.mark.parametrize('work_id', ['S999', 'work-42'])
+def test_source_folder_is_not_valid_output(config, work_id):
     with pytest.raises(GenerationError, match="overlaps"):
-        generate(replace(config, output_dir=config.video.parent))
+        generate(replace(config, work_id=work_id, output_dir=config.video.parent))
 
 
 @pytest.mark.parametrize("overrides", [{"margin": True}, {"crf": True}, {"camera_distance": 1},

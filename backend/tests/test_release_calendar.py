@@ -173,8 +173,10 @@ def test_actual_dates_do_not_claim_published_when_existing_status_false(inventor
     _, client, _ = inventory
     work = state(client)
     client.patch(f'/api/works/{work["id"]}', json={'patreon_published_date': '2026-10-03'})
-    event = client.get('/api/release-calendar?month=2026-10').json()['events'][0]
-    assert event['mode'] == 'actual' and event['published'] is False
+    calendar = client.get('/api/release-calendar?month=2026-10').json()
+    assert not calendar['events']
+    saved = next(item for item in calendar['works'] if item['id'] == work['id'])
+    assert saved['patreon_published_date'] == '2026-10-03' and saved['patreon_published'] is False
 
 
 def test_two_platform_transaction_rolls_back_as_unit(inventory):

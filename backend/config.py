@@ -35,6 +35,7 @@ class Root:
     path: Path
     windows_path: str
     label: str
+    identification: str = 'numbered'
 
     def windows_directory(self, directory: Path) -> str:
         relative = directory.resolve().relative_to(self.path.resolve())
@@ -69,7 +70,7 @@ class Config:
                 roots.append(Root(path, windows_path, path.name))
             else:
                 path = Path(definition["path"])
-                roots.append(Root(path, definition.get("windows_path", str(path)), definition.get("label", path.name)))
+                roots.append(Root(path, definition.get("windows_path", str(path)), definition.get("label", path.name), definition.get('identification', 'numbered')))
         return cls(data_dir=data_dir, roots=tuple(roots),
                    ffmpeg=os.environ.get("WORKBENCH_FFMPEG", "ffmpeg"),
                    ffprobe=os.environ.get("WORKBENCH_FFPROBE", "ffprobe"),

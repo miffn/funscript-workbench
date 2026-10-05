@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import re
 import sqlite3
+import uuid
 
 
 def now() -> str:
@@ -14,7 +15,9 @@ def now() -> str:
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS works (
- id INTEGER PRIMARY KEY, script_id TEXT NOT NULL UNIQUE, title TEXT NOT NULL,
+ id INTEGER PRIMARY KEY, script_id TEXT UNIQUE, title TEXT NOT NULL,
+ association_revision INTEGER NOT NULL DEFAULT 0, association_missing INTEGER NOT NULL DEFAULT 0,
+ preview_key TEXT, preview_stale INTEGER NOT NULL DEFAULT 0 CHECK(preview_stale IN (0,1)),
  status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','published')),
  es_published INTEGER NOT NULL DEFAULT 0 CHECK(es_published IN (0,1)),
  patreon_published INTEGER NOT NULL DEFAULT 0 CHECK(patreon_published IN (0,1)),
@@ -104,11 +107,35 @@ CREATE TABLE IF NOT EXISTS work_durations (
  last_good_seconds REAL, last_good_minutes INTEGER,
  error TEXT, updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS scan_candidates (
+ id INTEGER PRIMARY KEY, path TEXT NOT NULL UNIQUE, root_path TEXT NOT NULL,
+ windows_path TEXT NOT NULL, name TEXT NOT NULL, script_id TEXT,
+ available INTEGER NOT NULL DEFAULT 1, status TEXT NOT NULL DEFAULT 'pending',
+ revision INTEGER NOT NULL DEFAULT 1, fingerprint TEXT NOT NULL,
+ missing_work_ids TEXT NOT NULL DEFAULT '[]', video_count INTEGER NOT NULL DEFAULT 0,
+ script_count INTEGER NOT NULL DEFAULT 0, discovered_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_assets_directory ON assets(directory_id);
 CREATE INDEX IF NOT EXISTS idx_directories_work ON directories(work_id);
 CREATE INDEX IF NOT EXISTS idx_issues_work ON issues(work_id);
 CREATE INDEX IF NOT EXISTS idx_work_tags_tag ON work_tags(tag_id);
 """
+
+FOLDER_COLUMNS = (
+    ('association_revision', 'INTEGER NOT NULL DEFAULT 0'),
+    ('association_missing', 'INTEGER NOT NULL DEFAULT 0'), ('preview_key', 'TEXT'),
+    ('preview_stale', 'INTEGER NOT NULL DEFAULT 0 CHECK(preview_stale IN (0,1))'),
+)
+CANDIDATE_SCHEMA = SCHEMA[SCHEMA.index('CREATE TABLE IF NOT EXISTS scan_candidates'):SCHEMA.index('CREATE INDEX IF NOT EXISTS idx_assets_directory')]
+
+
+def add_folder_schema(db):
+    columns = {row['name'] for row in db.execute('PRAGMA table_info(works)')}
+    for field, definition in FOLDER_COLUMNS:
+        if field not in columns:
+            db.execute(f'ALTER TABLE works ADD COLUMN {field} {definition}')
+    db.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_works_preview_key ON works(preview_key) WHERE preview_key IS NOT NULL')
+    db.execute(CANDIDATE_SCHEMA)
 
 
 class Store:
@@ -116,7 +143,50 @@ class Store:
         data_dir.mkdir(parents=True, exist_ok=True)
         self.path = data_dir / "workbench.sqlite3"
         with self.connection() as db:
+            legacy = db.execute("SELECT sql FROM sqlite_master WHERE name='works' AND type='table'").fetchone()
+            columns = {row['name']: row for row in db.execute('PRAGMA table_info(works)')}
+            nullable_needed = bool(legacy and columns.get('script_id') and columns['script_id']['notnull'])
+            feature_needed = bool(legacy and (nullable_needed or any(field not in columns for field, _ in FOLDER_COLUMNS)
+                or not db.execute("SELECT 1 FROM sqlite_master WHERE name='idx_works_preview_key'").fetchone()
+                or not db.execute("SELECT 1 FROM sqlite_master WHERE name='scan_candidates'").fetchone()))
+            if feature_needed:
+                backup_dir = data_dir / 'backups'
+                backup_dir.mkdir(exist_ok=True)
+                backup_path = backup_dir / f"before-folder-identification-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S')}-{uuid.uuid4().hex[:8]}.sqlite3"
+                destination = sqlite3.connect(backup_path)
+                try:
+                    db.backup(destination)
+                finally:
+                    destination.close()
+                original = legacy[0]
+                expanded, replaced = re.subn(r'\bCREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:"works"|`works`|\[works\]|works)\s*\(',
+                                             'CREATE TABLE works_nullable (', original, count=1, flags=re.I)
+                expanded, nullable = re.subn(r'\bscript_id\s+TEXT\s+NOT\s+NULL\b', 'script_id TEXT', expanded, count=1, flags=re.I)
+                if nullable_needed and (replaced != 1 or nullable != 1):
+                    raise RuntimeError('无法识别作品表结构，已保留迁移前备份和原数据')
+                objects = [row[0] for row in db.execute("SELECT sql FROM sqlite_master WHERE tbl_name='works' AND type IN ('index','trigger') AND sql IS NOT NULL")]
+                db.execute('PRAGMA foreign_keys=OFF')
+                db.execute('BEGIN IMMEDIATE')
+                try:
+                    current_columns = {row['name']: row for row in db.execute('PRAGMA table_info(works)')}
+                    if current_columns['script_id']['notnull']:
+                        db.execute(expanded)
+                        db.execute('INSERT INTO works_nullable SELECT * FROM works')
+                        db.execute('DROP TABLE works')
+                        db.execute('ALTER TABLE works_nullable RENAME TO works')
+                        for definition in objects:
+                            db.execute(definition)
+                    add_folder_schema(db)
+                    if db.execute('PRAGMA foreign_key_check').fetchall():
+                        raise RuntimeError('作品迁移发现无效关联，原数据未变更')
+                    db.commit()
+                except Exception:
+                    db.rollback()
+                    raise
+                finally:
+                    db.execute('PRAGMA foreign_keys=ON')
             db.executescript(SCHEMA)
+            add_folder_schema(db)
             tag_schema = db.execute("SELECT sql FROM sqlite_master WHERE name='tags'").fetchone()[0]
             if any(f"'{category}'" not in tag_schema for category in ('axis_type', 'duration')):
                 # Rebuild only the category constraint; preserve IDs, bindings and revisions.

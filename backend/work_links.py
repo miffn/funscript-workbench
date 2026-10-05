@@ -112,7 +112,7 @@ class WorkLinks:
                 assignments = ','.join(f'{field}=?' for field in dates)
                 db.execute(f'UPDATE works SET {assignments},manual_fields=? WHERE id=?',
                            [*dates.values(), json.dumps(sorted(manual)), work_id])
-            if changes.get('es'):
+            if changes.get('es') and changes['es'] != current['links']['es']:
                 work = db.execute('SELECT manual_fields FROM works WHERE id=?', (work_id,)).fetchone()
                 manual = set(json.loads(work['manual_fields'])) | {'es_published'}
                 db.execute("UPDATE works SET es_published=1,status=CASE WHEN patreon_published=1 THEN 'published' ELSE 'pending' END,manual_fields=? WHERE id=?",

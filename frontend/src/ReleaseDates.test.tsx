@@ -29,6 +29,8 @@ it('shows calendar-only dates and leaves missing historical dates unrecorded', (
   expect(workDisplayTitle(work)).toBeNull();
   expect(workDisplayTitle({ ...work, title: ' S069 ' })).toBeNull();
   expect(workDisplayTitle({ ...work, title: '实际标题' })).toBe('实际标题');
+  expect(workDisplayTitle({ ...work, script_id: null, title: '普通文件夹' })).toBeNull();
+  expect(workDisplayTitle({ ...work, script_id: '', title: '普通文件夹' })).toBeNull();
 });
 
 it('displays both dates in every inventory mode without duplicating the ID heading', async () => {
@@ -67,7 +69,7 @@ it('preserves unsaved dates during publication toggles and confirms before disca
   fireEvent.change(es, { target: { value: '2026-09-28' } });
   patchWork = { ...work, es_published: true };
   fireEvent.click(screen.getByRole('button', { name: '标记 ES 已发布' }));
-  await screen.findByRole('button', { name: '将 ES 改为待发布' });
+  await screen.findByRole('button', { name: '将 ES 改为未发布' });
   expect((es as HTMLInputElement).value).toBe('2026-09-28');
   fireEvent.click(screen.getByRole('button', { name: '关闭作品详情' }));
   expect(screen.getByText('有尚未保存的修改')).toBeTruthy();

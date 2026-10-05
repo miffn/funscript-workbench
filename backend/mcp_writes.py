@@ -11,6 +11,7 @@ from .release_calendar import CalendarEdit
 WRITE = ToolAnnotations(read_only_hint=False, destructive_hint=True,
                         idempotent_hint=False, open_world_hint=False)
 ScriptID = Annotated[str, Field(min_length=1, max_length=32)]
+WorkID = Annotated[int, Field(strict=True, gt=0)]
 
 
 class ProfileMaintenance(BaseModel):
@@ -28,7 +29,7 @@ class ProfileMaintenance(BaseModel):
 
 
 class CalendarMaintenance(CalendarEdit):
-    # The MCP caller names the complete script ID; internal work IDs are not an input.
+    # The tool resolves its top-level identity; edit cannot override that work.
     work_id: None = Field(default=None, exclude=True)
     model_config = ConfigDict(extra='forbid', json_schema_extra=lambda schema: schema['properties'].pop('work_id', None))
 
@@ -36,7 +37,7 @@ class CalendarMaintenance(CalendarEdit):
     @classmethod
     def no_internal_work_id(cls, values):
         if isinstance(values, dict) and 'work_id' in values:
-            raise ValueError('Use script_id, not work_id')
+            raise ValueError('Supply the identity at tool level, not inside edit')
         return values
 
 
@@ -65,7 +66,8 @@ def register_content_tools(server, request, work, public_work, models):
             return self
 
     @server.tool(annotations=WRITE)
-    async def workbench_update_work(script_id: ScriptID, edit: WorkMaintenance) -> dict[str, Any]:
+    async def workbench_update_work(edit: WorkMaintenance, script_id: ScriptID | None = None,
+                                    work_id: WorkID | None = None) -> dict[str, Any]:
         """Maintain title/notes, ES/Patreon statuses or actual dates on explicit user request.
 
         First read workbench_get_work and copy data_revision to edit.expected_revision.
@@ -73,7 +75,7 @@ def register_content_tools(server, request, work, public_work, models):
         Records only workbench data; does not publish to any external site or confirm production.
         Dates must be user-confirmed, never inferred from a publishing plan.
         """
-        current = await work(script_id)
+        current = await work(script_id, work_id)
         result = await request('PATCH', f'/api/works/{current["id"]}', body=edit.model_dump(exclude_unset=True))
         return public_work(result)
 
@@ -88,35 +90,39 @@ def register_content_tools(server, request, work, public_work, models):
         return await request('PATCH', f'/api/tags/{tag_id}', body=edit.model_dump(exclude_unset=True))
 
     @server.tool(annotations=WRITE)
-    async def workbench_set_work_tags(script_id: ScriptID, edit: WorkTags) -> dict[str, Any]:
+    async def workbench_set_work_tags(edit: WorkTags, script_id: ScriptID | None = None,
+                                     work_id: WorkID | None = None) -> dict[str, Any]:
         """Replace a work's COMPLETE classification set using tags_revision as expected_revision.
 
         An empty list clears all labels. Preserve unrelated current tags unless the user requests removal.
         First read workbench_get_work; do not automatically resolve a 409 conflict.
         """
-        current = await work(script_id)
+        current = await work(script_id, work_id)
         return await request('PUT', f'/api/works/{current["id"]}/tags', body=edit.model_dump())
 
     @server.tool(annotations=WRITE)
-    async def workbench_update_work_links(script_id: ScriptID, edit: WorkLinks) -> dict[str, Any]:
+    async def workbench_update_work_links(edit: WorkLinks, script_id: ScriptID | None = None,
+                                         work_id: WorkID | None = None) -> dict[str, Any]:
         """Maintain selected ES/Patreon/video/script links or actual dates with links_revision.
 
-        Existing UI rules apply: storing a nonempty ES link marks ES published; new ES/Patreon
-        links with no actual date use today's date unless an explicit date (including null) is supplied.
+        Existing UI rules apply: a newly supplied or changed nonempty ES link marks ES published;
+        an unchanged link does not change that status. New or changed ES/Patreon links with no actual
+        date use today's date unless an explicit date (including null) is supplied.
         Only record user-confirmed publication details; this never publishes externally.
         """
-        current = await work(script_id)
+        current = await work(script_id, work_id)
         return await request('PATCH', f'/api/works/{current["id"]}/links', body=edit.model_dump(exclude_unset=True))
 
     @server.tool(annotations=WRITE)
-    async def workbench_update_release_calendar(script_id: ScriptID, edit: CalendarMaintenance) -> dict[str, Any]:
+    async def workbench_update_release_calendar(edit: CalendarMaintenance, script_id: ScriptID | None = None,
+                                               work_id: WorkID | None = None) -> dict[str, Any]:
         """Maintain ES/Patreon actual or planned dates using the revision from the read calendar.
 
         Actual non-null dates mark selected platforms published in workbench; clearing a date
         preserves publication status. Planned dates never become actual automatically.
         Save the returned operation ID for guarded undo. Does not publish externally.
         """
-        current = await work(script_id)
+        current = await work(script_id, work_id)
         body = {**edit.model_dump(exclude_unset=True), 'work_id': current['id']}
         return await request('POST', '/api/release-calendar', body=body)
 

@@ -1,3 +1,4 @@
+import { workIdentity } from './api';
 import { useI18n, translate } from './i18n';
 import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
@@ -15,18 +16,18 @@ const emptyLinks: WorkLinkValues = { patreon: '', video: '', script: '', es: '' 
 
 export function WorkLinkButtons({ work, onEdit }: { work: Work; onEdit: (kind: WorkLinkKind) => void }) {
   useI18n();
-  return <div className="work-link-buttons" role="group" aria-label={translate('{id} 的发布链接', { id: work.script_id })}>
+  return <div className="work-link-buttons" role="group" aria-label={translate('{id} 的发布链接', { id: workIdentity(work) })}>
     {linkTypes.map(({ kind, label, short, Icon }) => {
       const filled = !!work.links?.[kind];
       return <button key={kind} type="button" className={`work-link-button ${filled ? 'filled' : 'empty'} ${kind}`}
-        aria-label={translate('{action} {label} {id}', { action: filled ? translate('编辑') : translate('填写'), label: translate(label), id: work.script_id })} title={`${translate(short)} · ${filled ? translate('已填写，点击编辑') : translate('未填写，点击添加')}`}
+        aria-label={translate('{action} {label} {id}', { action: filled ? translate('编辑') : translate('填写'), label: translate(label), id: workIdentity(work) })} title={`${translate(short)} · ${filled ? translate('已填写，点击编辑') : translate('未填写，点击添加')}`}
         onClick={() => onEdit(kind)}><Icon size={17} aria-hidden="true" /><span>{translate(short)}</span>{filled && <Check className="link-filled-mark" size={10} aria-hidden="true" />}</button>;
     })}
   </div>;
 }
 
 export function WorkLinkEditor({ work, initialKind, onClose, onSaved }: {
-  work: Pick<Work, 'id' | 'script_id'>; initialKind: WorkLinkKind; onClose: () => void; onSaved: (value: WorkLinks) => void;
+  work: Pick<Work, 'id' | 'script_id'> & Partial<Pick<Work, 'title'>>; initialKind: WorkLinkKind; onClose: () => void; onSaved: (value: WorkLinks) => void;
 }) {
   useI18n();
   const dialog = useRef<HTMLDialogElement>(null);
@@ -112,7 +113,7 @@ export function WorkLinkEditor({ work, initialKind, onClose, onSaved }: {
     } finally { lock.current = false; if (alive.current) setSaving(false); }
   };
   return <dialog ref={dialog} className="tag-dialog work-links-dialog" aria-labelledby="work-links-title" onCancel={event => { event.preventDefault(); close(); }}>
-    <div className="detail-header"><div><span className="section-label">{translate("发布资料")}</span><h2 id="work-links-title">{translate('{id} · 发布链接', { id: work.script_id })}</h2></div><button className="icon-button" aria-label={translate("关闭链接编辑")} onClick={close} disabled={saving}><X size={20} /></button></div>
+    <div className="detail-header"><div><span className="section-label">{translate("发布资料")}</span><h2 id="work-links-title">{translate('{id} · 发布链接', { id: workIdentity(work) })}</h2></div><button className="icon-button" aria-label={translate("关闭链接编辑")} onClick={close} disabled={saving}><X size={20} /></button></div>
     {confirmClose && <div className="discard-confirm" role="alert"><strong>{translate("链接修改尚未保存")}</strong><p>{translate("关闭会放弃本次输入。")}</p><div><button ref={keepEditing} className="button small" onClick={() => { setConfirmClose(false); initialInput.current?.focus(); }}>{translate("继续编辑链接")}</button><button className="button small" onClick={onClose}>{translate("放弃链接修改并关闭")}</button></div></div>}
     <div className="tag-dialog-body">
       <p className="help-text">{translate("链接绑定当前完整编号，保存后扫描或重启不会覆盖。清空输入并保存可移除链接。")}</p>

@@ -57,6 +57,17 @@ beforeEach(() => {
 afterEach(() => { vi.useRealTimers(); cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe('inline generated media preview', () => {
+  it('keeps reassociated preview downloads and clears the stale notice when regeneration finishes', async () => {
+    vi.useFakeTimers(); state = { ...empty, stale: true, files: outputFiles };
+    render(<PreviewSection work={{ ...work, script_id: null, title: '普通文件夹', preview_stale: true }} capabilities={remote} />);
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.getByText('素材目录已重新关联，旧手动对应关系已失效。请先核对源视频和全部轴脚本，再重新生成预览。旧预览仍可查看。')).toBeTruthy();
+    expect(screen.getAllByRole('link')).toHaveLength(8);
+    state = { ...state, stale: false };
+    await act(async () => { await vi.advanceTimersByTimeAsync(10000); });
+    expect(screen.queryByText('素材目录已重新关联，旧手动对应关系已失效。请先核对源视频和全部轴脚本，再重新生成预览。旧预览仍可查看。')).toBeNull();
+    expect(screen.getAllByRole('link')).toHaveLength(8);
+  });
   const heatmap: PreviewFile = { filename: '热力图.png', kind: 'heatmap', clip_index: 0, width: 2048, height: 690, size: 4096, url: '/api/works/7/preview/files/heatmap.png?v=first' };
   it('loads only the requested video, GIF or heatmap and keeps separate download links', async () => {
     state = { ...empty, files: [...outputFiles.map(file => ({ ...file, url: `${file.url}?v=first` })), heatmap] };

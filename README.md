@@ -196,7 +196,9 @@ ctest --test-dir preview_generator/build --output-on-failure
 
 从旧版 Windows 热力图工具升级时，检查 systemd 的环境覆盖。如果曾设置 `WORKBENCH_HEATMAP_TOOL` 指向 `.exe`，删除该覆盖以恢复内置 Python 程序。检查 `WORKBENCH_PREVIEW_RENDERER`、`WORKBENCH_FFMPEG` 和 `WORKBENCH_FFPROBE`，确保使用 WSL 原生程序；默认 FFmpeg / FFprobe 从 WSL 的 PATH 查找。
 
-保留 `data/`，启动计划任务恢复服务。数据库升级自动执行；既有资料和预览文件保留，下一次生成任务按新的热力图程序指纹检查缓存。
+保留 `data/`，启动计划任务恢复服务。数据库升级自动执行；既有资料和预览文件保留，下一次生成任务按新的热力图程序指纹检查缓存。支持未编号作品的升级会先通过 SQLite 在线备份保存迁移前数据库，再原子迁移并检查关联；失败回滚。仍建议升级前停机备份整个 `data/`，回退旧程序时同步恢复迁移前数据库。
+
+既有扫描目录升级后保留“按编号识别”，新添加目录默认“按文件夹识别”，可在设置中修改；修改不会触发自动扫描。未编号作品使用内部 ID 维护资料，预览写入配置输出目录下的 `work-<内部ID>`；已生成的编号作品预览路径保留。移动或重命名素材后，在网页手动扫描并按提示恢复关联。
 
 如果启动脚本更新或项目目录移动，按第 4 节重新安装 Windows 自启动。移动项目时还需在新目录重建 `.venv`、前端和渲染器，运行 `bash scripts/install-service.sh` 更新服务路径，并检查 systemd 中自定义的绝对路径。
 
@@ -257,7 +259,7 @@ npx -y mcp-remote "http://localhost:8788/mcp" --allow-http --transport http-only
 | --- | --- |
 | `workbench_get_overview` | 服务状态、库存统计、待制作／待发布数量、最近扫描信息 |
 | `workbench_list_works` | 按编号、标题、标签搜索；按分类、标签 ID、异常和未标注情况筛选，支持分页 |
-| `workbench_get_work` | 指定完整编号的标签、链接、ES／Patreon 状态及日期、备注和素材清单 |
+| `workbench_get_work` | 指定内部作品 ID 或完整编号的标签、链接、ES／Patreon 状态及日期、备注和素材清单 |
 | `workbench_list_tags` | 标签 ID、分类、名称和作者支持链接 |
 | `workbench_get_release_calendar` | 指定 `YYYY-MM` 的计划及实际发布记录 |
 | `workbench_get_preview` | 已生成视频、GIF、热力图的文件 URL 和任务进度 |
@@ -269,7 +271,7 @@ npx -y mcp-remote "http://localhost:8788/mcp" --allow-http --transport http-only
 
 | 工具 | 修改内容 |
 | --- | --- |
-| `workbench_update_work` | 完整编号对应作品的标题、备注、ES／Patreon 状态与实际发布日期 |
+| `workbench_update_work` | 内部作品 ID 或完整编号对应作品的标题、备注、ES／Patreon 状态与实际发布日期 |
 | `workbench_create_tag` | 新增标签及作者支持链接 |
 | `workbench_update_tag` | 编辑标签名称、支持状态或支持链接 |
 | `workbench_set_work_tags` | 替换作品关联标签；保留想继续使用的标签 ID |
@@ -278,6 +280,8 @@ npx -y mcp-remote "http://localhost:8788/mcp" --allow-http --transport http-only
 | `workbench_undo_calendar_operation` | 撤销未被后续编辑覆盖的日历操作 |
 | `workbench_update_profile` | 修改工作台姓名与简介，保留头像 |
 | `workbench_update_language` | 修改共享界面语言 |
+
+作品工具使用 `work_id`（库存返回的 `id`）或 `script_id`（完整编号）定位，二者仅填写一个。未编号作品填写 `work_id`；原有编号调用方式继续支持。作品名称不是唯一标识，不能用于修改定位。
 
 先读取当前作品或设置，再提交修改。作品使用 `data_revision`，作品标签使用 `tags_revision`，作品链接使用 `links_revision`；共享标签、工作台资料和语言使用各自的 `revision`，日历使用日历条目的 `revision`。将对应值放入修改参数 `edit.expected_revision`；新增标签无需版本。工具参数和字段格式可从 MCP 工具列表查询。版本不一致返回 `409` 工具错误，应重新读取、核对用户意图后再修改，不自动重试覆盖。
 

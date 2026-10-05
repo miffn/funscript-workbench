@@ -267,7 +267,14 @@ def test_scanning_and_move_keep_labels_and_clear_legacy_video_type(inventory):
     before = current_works(store)
     (config.roots[0].path / "S071_one").rename(config.roots[0].path / "S071_renamed")
     scanner.scan()
-    assert current_works(store) == before
+    after = current_works(store)
+    derived = {'association_revision', 'association_missing', 'preview_key', 'preview_stale'}
+    assert [{field: value for field, value in work.items() if field not in derived} for work in after] == [
+        {field: value for field, value in work.items() if field not in derived} for work in before]
+    moved = next(work for work in after if work['id'] == works['S071'])
+    original = next(work for work in before if work['id'] == works['S071'])
+    assert moved['association_revision'] == original['association_revision'] + 1
+    assert moved['preview_key'] == 'S071' and moved['preview_stale'] == 1 and moved['association_missing'] == 0
     with TestClient(create_app(config, start_worker=False)) as client:
         detail = client.get(f"/api/works/{works['S071']}").json()
         assert detail["video_type"] == ""

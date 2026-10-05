@@ -64,6 +64,17 @@ it('uses Beijing today, a Monday-to-Sunday grid and shows both platform plans', 
   expect(posts()).toHaveLength(0);
 });
 
+it('searches and schedules an unnumbered folder work using its name and stable work ID', async () => {
+  works.push(work(4, { script_id: null, title: '普通文件夹' }));
+  renderCalendar(); await ready();
+  fireEvent.change(screen.getByLabelText('搜索日历库存'), { target: { value: '普通文件夹' } });
+  expect(screen.getByLabelText('拖动作品 普通文件夹')).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', { name: '添加到当天 普通文件夹' }));
+  await screen.findByRole('button', { name: '普通文件夹 ES 已发布 2026-10-03' });
+  expect(JSON.parse(posts()[0][1].body).work_id).toBe(4);
+  expect(screen.queryByText(/^null$/)).toBeNull();
+});
+
 it('shows one work record for both platforms and plans/actual dates on the same day', async () => {
   works[1] = { ...works[1], es_published: true, patreon_published: true, es_published_date: '2026-10-03', patreon_published_date: '2026-10-03' };
   renderCalendar(); await ready();

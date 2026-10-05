@@ -75,7 +75,9 @@ class JobWorker:
                     raise PreviewError("该作品已有其他视频正在生成，请等待当前任务完成", 409)
                 job_id = row[0]
             else:
+                inputs['title'] = db.execute('SELECT title FROM works WHERE id=?', (inputs['work_id'],)).fetchone()[0]
                 selection = {key: inputs[key] for key in ("work_id", "script_id", "video_asset_id")}
+                selection['title'] = inputs['title']
                 job_id = db.execute("INSERT INTO jobs(type,status,trigger,created_at,message,inputs,result) VALUES('preview','queued','manual',?,?,?,?)",
                                     (now(), "等待生成预览", json.dumps(inputs, ensure_ascii=False), json.dumps(selection))).lastrowid
         self.preview_wake_event.set()
@@ -95,7 +97,8 @@ class JobWorker:
                 selection = ScanRoots(self.store, self.config).state(db)
                 if not selection['enabled_paths']:
                     raise PreviewError('请至少启用一个扫描目录')
-                inputs = {'work_id': work_id, 'script_id': work['script_id'], 'enabled_paths': selection['enabled_paths']}
+                title = db.execute('SELECT title FROM works WHERE id=?', (work_id,)).fetchone()[0]
+                inputs = {'work_id': work_id, 'script_id': work['script_id'], 'title': title, 'enabled_paths': selection['enabled_paths']}
                 job_id = db.execute("INSERT INTO jobs(type,status,trigger,created_at,message,inputs) VALUES('rematch','queued','manual',?,?,?)", (now(), '等待重新匹配文件', json.dumps(inputs))).lastrowid
         self.wake_event.set()
         return self.store.job(job_id)
@@ -147,6 +150,7 @@ class JobWorker:
         inputs = dict(job["inputs"])
         inputs["_recovery_pid"] = (job.get("result") or {}).get("generator_pid")
         selection = {key: inputs.get(key) for key in ("work_id", "script_id", "video_asset_id")}
+        selection['title'] = inputs.get('title')
         selection["generator_pid"] = os.getpid()
         with self.store.connection() as db:
             db.execute("UPDATE jobs SET status='running',started_at=?,message='检查原视频及全部关联轴脚本',progress=0,error=NULL,result=? WHERE id=?", (now(), json.dumps(selection), job_id))
@@ -168,8 +172,8 @@ class JobWorker:
 
         try:
             manifest = self.previews.generate(inputs, on_progress=progress, cancel_event=self.stop_event)
-            result = {**selection, "manifest": manifest, "output_dir": str(self.config.preview_output_root / inputs["script_id"]),
-                      "files": self.previews.state(inputs["work_id"])["files"]}
+            state = self.previews.state(inputs['work_id'])
+            result = {**selection, "manifest": manifest, "output_dir": state['output_dir'], "files": state['files']}
             with self.store.connection() as db:
                 db.execute("UPDATE jobs SET status='completed',finished_at=?,progress=100,message='预览与热力图生成完成',result=?,error=NULL WHERE id=?", (now(), json.dumps(result, ensure_ascii=False), job_id))
         except GenerationCancelled:
@@ -224,16 +228,16 @@ class JobWorker:
         job = self.store.job(job_id)
         inputs = job['inputs']
         with self.store.connection() as db:
-            db.execute("UPDATE jobs SET status='running',started_at=?,progress=5,message='查找当前完整编号的素材目录',error=NULL WHERE id=?", (now(), job_id))
+            db.execute("UPDATE jobs SET status='running',started_at=?,progress=5,message='查找当前作品的素材目录',error=NULL WHERE id=?", (now(), job_id))
         try:
             roots = tuple(root for root in ScanRoots(self.store, self.config).roots() if str(root.path) in inputs['enabled_paths'])
             if not roots:
                 raise PreviewError('扫描目录已不在配置中，请重新选择目录')
-            result = self.scanner.scan(roots, target_id=inputs['script_id'])
+            result = self.scanner.scan(roots, target_id=inputs['script_id'], target_work_id=inputs['work_id'])
             with self.store.connection() as db:
                 db.execute("UPDATE jobs SET progress=75,message='更新当前作品的素材与封面' WHERE id=?", (job_id,))
             result['cover'] = self.covers.generate(inputs['work_id'], force=True, root_paths=[str(root.path) for root in roots])
-            result.update(work_id=inputs['work_id'], script_id=inputs['script_id'])
+            result.update(work_id=inputs['work_id'], script_id=inputs['script_id'], title=inputs.get('title'))
             with self.store.connection() as db:
                 db.execute("UPDATE jobs SET status='completed',finished_at=?,progress=100,message='文件匹配已刷新，请检查源视频与各轴脚本',result=? WHERE id=?", (now(), json.dumps(result, ensure_ascii=False), job_id))
         except Exception as error:

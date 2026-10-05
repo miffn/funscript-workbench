@@ -51,6 +51,9 @@ class ScanRoots:
         row = db.execute('SELECT value FROM settings WHERE key=?', (self.KEY,)).fetchone()
         if row:
             state = json.loads(row[0])
+            if any('identification' not in root for root in state['roots']):
+                state['roots'] = [{**root, 'identification': root.get('identification', 'numbered')} for root in state['roots']]
+                db.execute('UPDATE settings SET value=? WHERE key=?', (json.dumps(state, ensure_ascii=False), self.KEY))
         else:
             old = db.execute("SELECT value FROM settings WHERE key='scan_roots'").fetchone()
             selection = json.loads(old[0]) if old else None
@@ -73,7 +76,8 @@ class ScanRoots:
                         roots[path] = Root(Path(path), windows_path(Path(path)), Path(path).name)
             state = {'roots': [
                 {'path': str(root.path), 'windows_path': root.windows_path, 'label': root.label,
-                 'enabled': str(root.path) in selection['enabled_paths'] if selection else True}
+                 'enabled': str(root.path) in selection['enabled_paths'] if selection else True,
+                 'identification': root.identification}
                 for root in roots.values()], 'revision': selection['revision'] if selection else 0}
             db.execute('INSERT OR IGNORE INTO settings(key,value) VALUES(?,?)',
                        (self.KEY, json.dumps(state, ensure_ascii=False)))
@@ -84,7 +88,7 @@ class ScanRoots:
         if db is None:
             with self.store.connection() as connection:
                 return self.roots(connection)
-        return tuple(Root(Path(root['path']), root['windows_path'], root['label'])
+        return tuple(Root(Path(root['path']), root['windows_path'], root['label'], root['identification'])
                      for root in self.state(db)['roots'])
 
     def normalize(self, definition: dict, existing: dict[str, dict]) -> dict:
@@ -114,11 +118,14 @@ class ScanRoots:
         if path.resolve().is_relative_to(self.config.preview_output_root.resolve()):
             raise ScanRootsError('预览输出目录不能作为库存扫描目录')
         previous = existing.get(str(path))
+        identification = definition.get('identification', previous.get('identification', 'numbered') if previous else 'folder')
+        if identification not in {'numbered', 'folder'}:
+            raise ScanRootsError('识别方式应为 numbered 或 folder')
         label = definition.get('label', '').strip() or (previous['label'] if previous else path.name)
         if len(label) > 120 or any(unicodedata.category(char) in {'Cc', 'Cf'} for char in label):
             raise ScanRootsError('目录名称应为 1 到 120 个普通字符')
         return {'path': str(path), 'windows_path': previous['windows_path'] if previous else windows_path(path),
-                'label': label, 'enabled': definition['enabled']}
+                'label': label, 'enabled': definition['enabled'], 'identification': identification}
 
     def update(self, enabled_paths: list[str], expected_revision: int) -> dict:
         if not enabled_paths:
@@ -151,7 +158,7 @@ class ScanRoots:
     def _save(self, db, current: dict, roots: list[dict], expected_revision: int) -> dict:
         if current['revision'] != expected_revision:
             raise ScanRootsError('扫描目录设置已被其他页面修改，请刷新后重试', 409)
-        structure = lambda items: {(root['path'], root['windows_path'], root['label']) for root in items}
+        structure = lambda items: {(root['path'], root['windows_path'], root['label'], root.get('identification', 'numbered')) for root in items}
         if structure(current['roots']) != structure(roots):
             if db.execute("SELECT 1 FROM jobs WHERE type IN ('scan','rematch','preview') AND status IN ('queued','running') LIMIT 1").fetchone():
                 raise ScanRootsError('正在扫描、匹配或生成预览，请等待任务完成后增删目录', 409)

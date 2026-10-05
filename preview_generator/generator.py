@@ -117,8 +117,8 @@ def clip_ranges(duration: float, percentages: tuple[float, ...], seconds: float)
 
 
 def _validate_config(config: Config) -> tuple[Path, Path, Path, dict[str, Path]]:
-    if not re.fullmatch(r"S\d{3,}(?:_\d{3,})?", config.work_id):
-        raise GenerationError("work_id must be a complete ID such as S064 or S025_001")
+    if not isinstance(config.work_id, str) or not re.fullmatch(r"(?:S\d{3,}(?:_\d{3,})?|work-[1-9]\d*)", config.work_id):
+        raise GenerationError("work_id must be a complete ID such as S064 or a stable key such as work-123")
     video = Path(config.video).expanduser().resolve()
     output = Path(config.output_dir or OUTPUT_ROOT / config.work_id).expanduser().resolve()
     renderer = Path(config.renderer).expanduser().resolve()

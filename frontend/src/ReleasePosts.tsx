@@ -1,3 +1,4 @@
+import { workIdentity } from './api';
 import { useEffect, useRef, useState } from 'react';
 import { Check, CircleAlert, Copy, Download, FileText, LoaderCircle, RefreshCw, Save, Settings2, X } from 'lucide-react';
 import { ApiError, errorMessage, formatDate, formatSize, request } from './api';
@@ -120,7 +121,7 @@ export function ReleasePostEditor({ workId, onClose }: { workId: number; onClose
   function exportPost() {
     if (!output || !fresh) return;
     const url = URL.createObjectURL(new Blob([`${output.title}\n\n${output.body}\n`], { type: 'text/plain;charset=utf-8' }));
-    const anchor = document.createElement('a'); anchor.href = url; anchor.download = `${work?.script_id || workId}-ES-${output.status}.txt`; anchor.click();
+    const anchor = document.createElement('a'); anchor.href = url; anchor.download = `${work ? workIdentity(work) : workId}-ES-${output.status}.txt`; anchor.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
   function sourceChoices(files: PreviewFile[], group: string) {
@@ -128,7 +129,7 @@ export function ReleasePostEditor({ workId, onClose }: { workId: number; onClose
   }
 
   return <dialog className="tag-dialog es-post-dialog" ref={dialog} aria-labelledby="es-post-title" onCancel={event => { event.preventDefault(); close(); }}>
-    <header className="detail-header"><div><p>{t("ES 发布准备")}</p><h2 id="es-post-title">{work?.script_id || t("作品")} {t("· 生成贴文")}</h2></div><button className="icon-button" type="button" onClick={close} disabled={busy} aria-label={t("关闭贴文编辑器")}><X size={22} /></button></header>
+    <header className="detail-header"><div><p>{t("ES 发布准备")}</p><h2 id="es-post-title">{work ? workIdentity(work) : t("作品")} {t("· 生成贴文")}</h2></div><button className="icon-button" type="button" onClick={close} disabled={busy} aria-label={t("关闭贴文编辑器")}><X size={22} /></button></header>
     <div className="tag-dialog-body es-post-body">
       <p className="es-help">{t("资料、上传 Markdown 和生成稿保存在数据库中。上传附件、粘贴贴文和发布由你在 ES 完成。")}</p>
       {error && <div ref={errorSummary} tabIndex={-1} className="es-feedback error" role="alert"><CircleAlert size={17} aria-hidden="true" /><span>{t(error)}</span>{conflict ? <button className="button small" disabled={busy} onClick={() => { if (!dirty || window.confirm(t("重新加载会替换当前未保存的输入，是否继续？"))) setRetry(value => value + 1); }}>{t("加载最新资料")}</button> : !state && <button className="button small" disabled={busy} onClick={() => setRetry(value => value + 1)}>{t("重试")}</button>}</div>}

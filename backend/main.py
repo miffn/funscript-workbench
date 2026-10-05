@@ -22,12 +22,14 @@ from .tags import TagService, TagError
 from .durations import duration_fields
 from .scan_roots import ScanRoots, ScanRootsError
 from .work_links import WorkLinks, WorkLinksError
-from .release_dates import RELEASE_DATE_FIELDS, validate_release_date
+from .release_dates import RELEASE_DATE_FIELDS, validate_release_date, release_today
 from .profile import register_profile_routes
 from .language import register_language_routes
 from .es_posts import register_es_post_routes
 from .release_calendar import register_release_calendar_routes
-from .work_directory import current_directory
+from .work_directory import current_directory, directory_status
+from .production import reset_production
+from .scan_candidates import ScanCandidates, ScanCandidatesError
 from .mcp_server import create_workbench_mcp, mcp_http_app
 from .mcp_auth import MCPAuth, register_mcp_auth_routes
 
@@ -86,6 +88,23 @@ class ScanRootDefinition(BaseModel):
     path: str = Field(strict=True, min_length=1, max_length=2000)
     label: str = Field(default='', strict=True, max_length=120)
     enabled: bool = Field(strict=True)
+    identification: Literal['numbered', 'folder'] = 'folder'
+
+
+class CandidateResolution(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    action: Literal['create', 'associate']
+    expected_revision: StrictInt = Field(ge=1)
+    work_id: StrictInt | None = Field(default=None, gt=0)
+    expected_work_revision: StrictInt | None = Field(default=None, ge=0)
+
+    @model_validator(mode='after')
+    def association_target(self):
+        if self.action == 'associate' and (self.work_id is None or self.expected_work_revision is None):
+            raise ValueError('关联已有作品需要作品 ID 和关联版本')
+        if self.action == 'create' and (self.work_id is not None or self.expected_work_revision is not None):
+            raise ValueError('创建新作品不能指定已有作品')
+        return self
 
 
 class ScanRootsEdit(BaseModel):
@@ -190,6 +209,7 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
         record['es_published'] = bool(record['es_published'])
         record['patreon_published'] = bool(record['patreon_published'])
         record['production_required'] = bool(record['production_required'])
+        record['preview_stale'] = bool(record['preview_stale'])
         record['status'] = 'published' if record['es_published'] and record['patreon_published'] else 'pending'
         metadata = enrich_metadata(json.loads(record["metadata"]))
         record.pop("manual_fields", None)
@@ -209,14 +229,15 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
         registered_roots = {str(root.path) for root in scan_roots.roots(db)}
         unavailable_roots = latest.get("unavailable_roots", [])
         directory = current_directory(db, record['id'])
+        record['association_status'] = directory_status(db, record['id'], scan_roots.roots(db))
         directories = [dict(directory)] if directory is not None else []
         for directory in directories:
-            directory["available"] = bool(directory["available"]) and directory["root_path"] not in unavailable_roots and directory['root_path'] in registered_roots
+            directory["available"] = bool(directory["available"]) and record['association_status'] == 'available' and directory["root_path"] not in unavailable_roots and directory['root_path'] in registered_roots
         record["directories"] = directories
         assets = [dict(row) for row in db.execute("SELECT * FROM assets WHERE directory_id=? ORDER BY kind,relative_path COLLATE NOCASE", (directory['id'],))] if directory is not None else []
         active_ids = {directory["id"] for directory in directories if directory["available"]}
         # Unreachable root keeps prior inventory counts; vanished directory is historical only.
-        counted_ids = active_ids | {directory["id"] for directory in directories if directory["root_path"] in unavailable_roots or directory['root_path'] not in registered_roots}
+        counted_ids = active_ids | {directory["id"] for directory in directories if record['association_status'] == 'unavailable' or directory["root_path"] in unavailable_roots or directory['root_path'] not in registered_roots}
         record["video_count"] = sum(asset["kind"] == "video" and asset["directory_id"] in counted_ids for asset in assets)
         record["script_count"] = sum(asset["kind"] == "script" and asset["directory_id"] in counted_ids for asset in assets)
         record["issues"] = [{"type": row["type"], "message": row["message"]} for row in db.execute("SELECT type,message FROM issues WHERE work_id=? ORDER BY id", (record["id"],))]
@@ -294,12 +315,16 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
         unavailable = set((last_scan(db) or {}).get('unavailable_roots', []))
         script_directories = {row[0] for row in db.execute("SELECT DISTINCT directory_id FROM assets WHERE kind='script'")}
         required = {row[0] for row in db.execute('SELECT id FROM works WHERE production_required=1')}
+        roots = scan_roots.roots(db)
         ready, to_make = set(), set()
         for row in db.execute('SELECT DISTINCT work_id FROM directories').fetchall():
             directory = current_directory(db, row[0])
             if directory is None:
                 continue
-            if directory['available'] or directory['root_path'] in unavailable or directory['root_path'] not in registered:
+            association = directory_status(db, row[0], roots)
+            if association in {'missing', 'conflict', 'unlinked'}:
+                continue
+            if directory['available'] or association == 'unavailable' or directory['root_path'] in unavailable or directory['root_path'] not in registered:
                 (ready if directory['id'] in script_directories and row[0] not in required else to_make).add(row[0])
         return ready, to_make
 
@@ -339,7 +364,7 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
                 values.extend(ids)
             where = " WHERE " + " AND ".join(clauses) if clauses else ""
             total = db.execute("SELECT count(*) FROM works" + where, values).fetchone()[0]
-            rows = db.execute("SELECT * FROM works" + where + " ORDER BY script_id DESC LIMIT ? OFFSET ?", [*values, page_size, (page - 1) * page_size]).fetchall()
+            rows = db.execute("SELECT * FROM works" + where + " ORDER BY script_id DESC,id DESC LIMIT ? OFFSET ?", [*values, page_size, (page - 1) * page_size]).fetchall()
             stats = {"total": db.execute("SELECT count(*) FROM works").fetchone()[0],
                      "pending": sum(row['id'] in ready_ids for row in db.execute("SELECT id FROM works WHERE es_published=0 OR patreon_published=0")),
                      "to_make": len(to_make_ids),
@@ -353,6 +378,28 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
     @app.get("/api/works/{work_id}")
     def work_detail(work_id: int):
         with store.connection() as db:
+            return details(db, require_work(db, work_id), include_assets=True)
+
+    @app.get('/api/scan-candidates')
+    def scan_candidates():
+        return ScanCandidates(store, config).catalog()
+
+    @app.post('/api/scan-candidates/{candidate_id}/resolve')
+    def resolve_candidate(candidate_id: int, options: CandidateResolution):
+        try:
+            result = ScanCandidates(store, config).resolve(candidate_id, options.action, options.expected_revision,
+                options.work_id, options.expected_work_revision)
+            with store.connection() as db:
+                work = details(db, require_work(db, result['work_id']), include_assets=True)
+            return {'candidate_id': result['candidate_id'], 'action': result['action'], 'work': work}
+        except ScanCandidatesError as error:
+            raise HTTPException(error.status_code, str(error))
+
+    @app.post('/api/works/{work_id}/production/reset')
+    def return_to_production(work_id: int, options: ProductionConfirmation):
+        with store.connection() as db:
+            db.execute('BEGIN IMMEDIATE')
+            reset_production(db, work_id, options.expected_revision)
             return details(db, require_work(db, work_id), include_assets=True)
 
     @app.post('/api/works/{work_id}/production/confirm')
@@ -453,6 +500,10 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
             if expected_revision is not None and expected_revision != work_data_revision(current):
                 raise HTTPException(409, '作品资料已被其他操作修改，请重新读取后再保存')
             if changes:
+                for platform in ('es', 'patreon'):
+                    date_field = f'{platform}_published_date'
+                    if changes.get(f'{platform}_published') is True and not current[f'{platform}_published'] and not current[date_field] and date_field not in changes:
+                        changes[date_field] = release_today()
                 manual_fields = set(json.loads(current["manual_fields"])) | set(changes)
                 if {'es_published', 'patreon_published'} & changes.keys():
                     es = changes.get('es_published', bool(current['es_published']))
@@ -501,13 +552,13 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
                 "scan_roots_revision": selection["revision"],
                 "scan_mode": "manual", "scan_interval_seconds": 0,
                 "database": "SQLite", "history_import": json.loads(imported[0]) if imported else None,
-                "folder_identifier_rule": "S029、S025_001；以编号文件夹为准", "host_access_url": "http://localhost:8788/"}
+                "folder_identifier_rule": "按编号识别：S029、S025_001；按文件夹识别：每个直属文件夹一个作品，编号可选", "host_access_url": "http://localhost:8788/"}
 
     @app.put("/api/settings/scan-roots")
     def update_scan_roots(options: ScanRootsEdit):
         try:
             if options.roots is not None:
-                scan_roots.replace([root.model_dump() for root in options.roots], options.expected_revision)
+                scan_roots.replace([root.model_dump(exclude_unset=True) for root in options.roots], options.expected_revision)
             else:
                 scan_roots.update(options.enabled_paths, options.expected_revision)
         except ScanRootsError as error:
@@ -594,7 +645,7 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
         require_host_origin(request)
         try:
             work = worker.previews.work(work_id)
-            output = worker.previews.output_directory(work["script_id"])
+            output = worker.previews.output_directory(worker.previews.preview_key(work))
             if not output.is_dir():
                 raise PreviewError("预览输出目录尚不存在，请先生成预览", 404)
             windows_root = worker.previews.windows_path(config.preview_output_root)

@@ -37,7 +37,7 @@ describe('persistent work editing', () => {
     fireEvent.change(notes, { target: { value: '正在输入的备注' } });
     fetchMock.mockResolvedValueOnce(response({ ...fixture, es_published: true, patreon_published: false }));
     fireEvent.click(screen.getByRole('button', { name: '标记 ES 已发布' }));
-    await screen.findByRole('button', { name: '将 ES 改为待发布' });
+    await screen.findByRole('button', { name: '将 ES 改为未发布' });
     expect((notes as HTMLTextAreaElement).value).toBe('正在输入的备注');
     expect(saved).toHaveBeenCalledOnce();
     expect(JSON.parse(fetchMock.mock.calls.find(([url, init]) => url === '/api/works/7' && init?.method === 'PATCH')![1].body)).toEqual({ es_published: true });
@@ -53,11 +53,11 @@ describe('persistent work editing', () => {
     fireEvent.change(notes, { target: { value: '尚未保存的备注' } });
     fetchMock.mockResolvedValueOnce(response({ ...fixture, status: 'published', es_published: true, patreon_published: true }));
     fireEvent.click(screen.getByRole('button', { name: '标记 Patreon 已发布' }));
-    await screen.findByRole('button', { name: '将 Patreon 改为待发布' });
+    await screen.findByRole('button', { name: '将 Patreon 改为未发布' });
     fetchMock.mockResolvedValueOnce(response({ ...fixture, es_published: false, patreon_published: true }));
-    fireEvent.click(screen.getByRole('button', { name: '将 ES 改为待发布' }));
+    fireEvent.click(screen.getByRole('button', { name: '将 ES 改为未发布' }));
     await screen.findByRole('button', { name: '标记 ES 已发布' });
-    expect(screen.getByRole('button', { name: '将 Patreon 改为待发布' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '将 Patreon 改为未发布' })).toBeTruthy();
     expect((title as HTMLInputElement).value).toBe('尚未保存的标题');
     expect((notes as HTMLTextAreaElement).value).toBe('尚未保存的备注');
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'PATCH').map(([, init]) => JSON.parse(init.body))).toEqual([{ patreon_published: true }, { es_published: false }]);
@@ -94,7 +94,7 @@ describe('persistent work editing', () => {
     fireEvent.click(es); fireEvent.click(patreon);
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'PATCH')).toHaveLength(1);
     complete!(response({ ...current, es_published: true }));
-    await screen.findByRole('button', { name: '将 ES 改为待发布' });
+    await screen.findByRole('button', { name: '将 ES 改为未发布' });
     expect((pitch as HTMLSelectElement).value).toBe('22');
     expect(screen.getByRole('button', { name: '放弃调整' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '关闭作品详情' }));

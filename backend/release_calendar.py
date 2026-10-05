@@ -130,12 +130,12 @@ class ReleaseCalendar:
             for platform in ('es', 'patreon'):
                 for mode, suffix in (('actual', 'published_date'), ('planned', 'planned_date')):
                     day = work[f'{platform}_{suffix}']
-                    if day and start <= day <= end:
+                    if day and start <= day <= end and (mode != 'actual' or work[f'{platform}_published']):
                         events.append({'key': f'{work["id"]}:{platform}:{mode}', 'work_id': work['id'],
                                        'script_id': work['script_id'], 'title': work['title'],
                                        'platform': platform, 'mode': mode, 'date': day,
                                        'published': work[f'{platform}_published'], 'revision': work['revision']})
-        events.sort(key=lambda item: (item['date'], item['script_id'], item['platform'], item['mode']))
+        events.sort(key=lambda item: (item['date'], item['script_id'] or '', item['work_id'], item['platform'], item['mode']))
         return {'month': month, 'today': release_today(), 'events': events, 'works': works}
 
     def update(self, edit: CalendarEdit) -> dict:

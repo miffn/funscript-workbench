@@ -95,12 +95,13 @@ class PreviewMatching:
             issues.append('没有可读取的视频，请检查目录并重新匹配文件')
         else:
             issues.append('作品关联多个视频，请先选择源视频')
-        manifest = self.previews._manifest(self.previews.output_directory(work['script_id']) / 'manifest.json', work['script_id'])
-        changed = False
+        key = self.previews.preview_key(work)
+        manifest = self.previews._manifest(self.previews.output_directory(key) / 'manifest.json', key)
+        changed = bool(work['preview_stale'])
         if manifest and manifest.get('status') == 'completed' and selected:
             old_video, old_scripts = manifest.get('video', {}), manifest.get('scripts', {})
             if old_video and isinstance(old_scripts, dict):
-                changed = old_video.get('path') != str(video_path) or {axis: info.get('path') for axis, info in old_scripts.items()} != paths
+                changed = changed or old_video.get('path') != str(video_path) or {axis: info.get('path') for axis, info in old_scripts.items()} != paths
                 changed = changed or old_video.get('size', video_path.stat().st_size) != video_path.stat().st_size
                 # Filesystem stamps catch edits without repeatedly hashing a large video.
                 stamps = manifest.get('source_signatures')

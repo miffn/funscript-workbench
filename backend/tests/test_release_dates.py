@@ -74,13 +74,15 @@ def test_explicit_date_clear_wins_and_repeat_save_does_not_refill(inventory):
     assert changed['patreon_published_date'] is None
 
 
-def test_other_links_and_status_changes_do_not_set_release_dates(inventory):
+def test_other_links_preserve_unknown_dates_and_marking_published_defaults_today(inventory):
     _, _, _, client, path = inventory
     assert client.patch(path + '/links', json={'expected_revision': 0,
         'links': {'video': 'https://example.test/movie', 'script': 'https://example.test/download'}}).status_code == 200
+    assert client.get(path).json()['es_published_date'] is client.get(path).json()['patreon_published_date'] is None
     client.patch(path, json={'es_published': True, 'patreon_published': True})
     work = client.get(path).json()
-    assert work['es_published_date'] is work['patreon_published_date'] is None
+    from backend.release_dates import release_today
+    assert work['es_published_date'] == work['patreon_published_date'] == release_today()
 
 
 def test_date_only_edits_persist_across_scan_rematch_restart(inventory):

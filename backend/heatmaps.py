@@ -144,7 +144,7 @@ def generate_heatmap(script_id: str, scripts: dict[str, str], output_dir: Path,
             original = Path(scripts[axis])
             parsed = load_script(original)
             document = json.loads(original.read_text(encoding='utf-8-sig'))
-            # This exe measures time from its final action, ignoring metadata.
+            # The renderer measures time from its final action, ignoring metadata.
             # Clamp/hold copies to video end to give every selected axis one timeline.
             document['actions'] = [{'at': round(t * 1000), 'pos': p * 100}
                                    for t, p in zip(parsed.times, parsed.positions)

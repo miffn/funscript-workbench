@@ -34,7 +34,7 @@ def tag_key(category: str, name: str) -> str:
 
 def database_state(db) -> tuple[dict, dict, dict, dict]:
     tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-    works = {row["script_id"]: dict(row) for row in db.execute("SELECT id,script_id FROM works")}
+    works = {row["script_id"]: dict(row) for row in db.execute("SELECT id,script_id FROM works WHERE script_id IS NOT NULL")}
     tags = {tag_key(row["category"], row["name"]): dict(row) for row in db.execute("SELECT * FROM tags")} if "tags" in tables else {}
     by_id = {tag["id"]: tag for tag in tags.values()}
     bindings = {}

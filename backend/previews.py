@@ -71,13 +71,28 @@ class PreviewService:
 
     def work(self, work_id: int):
         with self.store.connection() as db:
-            row = db.execute("SELECT id,script_id FROM works WHERE id=?", (work_id,)).fetchone()
+            row = db.execute("SELECT id,script_id,preview_key,preview_stale,association_revision FROM works WHERE id=?", (work_id,)).fetchone()
         if row is None:
             raise PreviewError("库存编号不存在", 404)
         return dict(row)
 
+    def preview_key(self, work: dict, db=None) -> str:
+        if db is None:
+            with self.store.connection() as connection:
+                return self.preview_key(work, connection)
+        key = work.get('preview_key')
+        if key is None:
+            key = work.get('script_id') or f"work-{work['id']}"
+            # A rebound work can reserve its old S064 output after releasing that code.
+            if db.execute('SELECT 1 FROM works WHERE id<>? AND (preview_key=? OR '
+                          '(preview_key IS NULL AND script_id=?))', (work['id'], key, key)).fetchone():
+                key = f"work-{work['id']}"
+        if not isinstance(key, str) or (normalize_id(key) != key and key != f"work-{work['id']}"):
+            raise PreviewError('预览存储标识无效', 403)
+        return key
+
     def output_directory(self, script_id: str) -> Path:
-        if normalize_id(script_id) != script_id:
+        if not isinstance(script_id, str) or (normalize_id(script_id) != script_id and not re.fullmatch(r'work-[1-9]\d*', script_id)):
             raise PreviewError("作品完整编号无效", 403)
         root = self.config.preview_output_root.absolute()
         output = root / script_id
@@ -123,7 +138,8 @@ class PreviewService:
 
     def select_inputs(self, work_id: int, video_asset_id: int | None = None) -> dict:
         work = self.work(work_id)
-        output = self.output_directory(work["script_id"])
+        key = self.preview_key(work)
+        output = self.output_directory(key)
         with self.store.connection() as db:
             assets = [dict(row) for row in db.execute("SELECT a.*,d.path,d.root_path,d.available FROM assets a JOIN directories d ON d.id=a.directory_id WHERE d.work_id=? AND a.kind='video' ORDER BY a.id", (work_id,))]
         if video_asset_id is not None:
@@ -155,7 +171,16 @@ class PreviewService:
             rows = self.matching.assets(db, work_id)
         scripts = {axis: self.valid_source(next(asset for asset in rows if asset['id'] == asset_id))
                    for axis, asset_id in match['script_asset_ids'].items()}
-        return {"work_id": work_id, "script_id": work["script_id"], "video_asset_id": selected["id"],
+        if work['preview_key'] is None:
+            with self.store.connection() as db:
+                db.execute('BEGIN IMMEDIATE')
+                current = dict(db.execute('SELECT id,script_id,preview_key,preview_stale,association_revision FROM works WHERE id=?', (work_id,)).fetchone())
+                if (current['script_id'] != work['script_id'] or current['association_revision'] != work['association_revision']
+                        or self.preview_key(current, db) != key):
+                    raise PreviewError('作品关联在准备任务期间变化，请刷新后重新生成', 409)
+                db.execute('UPDATE works SET preview_key=? WHERE id=? AND preview_key IS NULL', (key, work_id))
+        return {"work_id": work_id, "script_id": work["script_id"], "preview_key": key, "video_asset_id": selected["id"],
+                "association_revision": work['association_revision'],
                 "video_path": str(video), "scripts": {axis: str(path) for axis, path in scripts.items()},
                 "matching_revision": match['revision'],
                 "source_signatures": self.matching.signatures(str(video), {axis: str(path) for axis, path in scripts.items()}),
@@ -201,7 +226,7 @@ class PreviewService:
         return checksum
 
     def trusted_files(self, work: dict, manifests: list[dict]) -> list[dict]:
-        output = self.output_directory(work["script_id"])
+        output = self.output_directory(self.preview_key(work))
         files = {}
         for manifest in manifests:
             for entry in manifest.get("outputs", []):
@@ -240,9 +265,10 @@ class PreviewService:
 
     def _state(self, work_id: int) -> dict:
         work = self.work(work_id)
-        output = self.output_directory(work["script_id"])
-        current = self._manifest(output / "manifest.json", work["script_id"])
-        previous = self._manifest(self.state_path(work_id), work["script_id"])
+        key = self.preview_key(work)
+        output = self.output_directory(key)
+        current = self._manifest(output / "manifest.json", key)
+        previous = self._manifest(self.state_path(work_id), key)
         with self.store.connection() as db:
             row = db.execute("SELECT id FROM jobs WHERE type='preview' AND json_extract(inputs,'$.work_id')=? ORDER BY id DESC LIMIT 1", (work_id,)).fetchone()
         job = self.store.job(row[0]) if row else None
@@ -250,7 +276,8 @@ class PreviewService:
         if not error and not (job and job["status"] in {"queued", "running"}) and current and current.get("status") in {"failed", "cancelled"}:
             error = current.get("error") or "上次预览生成未完成"
         return {"job": job, "files": self.trusted_files(work, [manifest for manifest in (current, previous) if manifest]),
-                "output_dir": str(output), "windows_path": self.windows_path(output), "error": error}
+                "output_dir": str(output), "windows_path": self.windows_path(output), "error": error,
+                "preview_key": key, "stale": bool(work['preview_stale'])}
 
     def media_path(self, work_id: int, filename: str) -> Path:
         if filename not in MEDIA_FILES:
@@ -328,7 +355,7 @@ class PreviewService:
         # Recheck the persisted selection after queueing/restart, never stored paths alone.
         checked = self.select_inputs(inputs["work_id"], inputs["video_asset_id"])
         if any(checked[key] != inputs.get(key, checked[key]) for key in
-               ("script_id", "video_path", "scripts", "matching_revision", "source_signatures")):
+               ("script_id", "preview_key", "association_revision", "video_path", "scripts", "matching_revision", "source_signatures")):
             raise PreviewError("素材或脚本匹配在任务排队期间变化，请刷新后重新生成", 409)
         output = Path(checked['output_dir'])
         output.mkdir(parents=True, exist_ok=True)
@@ -342,18 +369,18 @@ class PreviewService:
             json.dump({'pid': os.getpid()}, handle)
         stage = None
         try:
-            self.save_previous(inputs['work_id'], inputs['script_id'])
+            self.save_previous(inputs['work_id'], checked['preview_key'])
             stage = Path(tempfile.mkdtemp(prefix='.workbench-stage-', dir=output))
             self.write_json(lock_path, {'pid': os.getpid(), 'workbench_stage': stage.name})
             # Copy prior validated files into staging so normal generation can reuse them.
-            current = self._manifest(output / 'manifest.json', checked['script_id'])
+            current = self._manifest(output / 'manifest.json', checked['preview_key'])
             if current and current.get('status') == 'completed' and not inputs.get('force', False):
                 for filename in [*MEDIA_FILES, 'manifest.json']:
                     path = output / filename
                     no_symlinks(path)
                     if path.is_file():
                         shutil.copy2(path, stage / filename)
-            generator_config = GeneratorConfig(work_id=checked['script_id'], video=checked['video_path'],
+            generator_config = GeneratorConfig(work_id=checked['preview_key'], video=checked['video_path'],
                 scripts=checked['scripts'], output_dir=str(stage), renderer=self.config.preview_renderer,
                 model='builtin', show_axis_hud=True, ffmpeg=self.config.ffmpeg, ffprobe=self.config.ffprobe,
                 force=bool(inputs.get('force', False)), cache_dir=self.config.data_dir / 'preview-generator')
@@ -362,7 +389,7 @@ class PreviewService:
                     on_progress({**event, 'progress': event.get('progress', 0) * .9,
                                  'stage': 'previews_ready' if event.get('stage') == 'completed' else event.get('stage')})
             manifest = generate(generator_config, on_progress=preview_progress, cancel_event=cancel_event)
-            if manifest.get('status') != 'completed' or manifest.get('work_id') != checked['script_id']:
+            if manifest.get('status') != 'completed' or manifest.get('work_id') != checked['preview_key']:
                 raise PreviewError('生成程序未返回完整的完成结果')
             clip_records = manifest.get('outputs', [])
             if len(clip_records) != len(CLIP_MEDIA_FILES) or {entry.get('filename') for entry in clip_records} != set(CLIP_MEDIA_FILES):
@@ -383,7 +410,7 @@ class PreviewService:
                     and old_heatmap and heatmap_path.is_file() and self._checksum(heatmap_path) == old_heatmap.get('sha256')):
                 heatmap = {**old_heatmap, 'path': str(heatmap_path), 'reused': True}
             else:
-                heatmap = generate_heatmap(checked['script_id'], checked['scripts'], stage,
+                heatmap = generate_heatmap(checked['preview_key'], checked['scripts'], stage,
                     duration_seconds=manifest.get('video', {}).get('duration_seconds'),
                     cancel_event=cancel_event, tool_path=self.config.heatmap_tool)
                 heatmap['reused'] = False
@@ -410,10 +437,18 @@ class PreviewService:
                     raise PreviewError('生成结果校验失败，保留旧预览')
                 entry['path'] = str(output / entry['filename'])
             manifest['output_dir'] = str(output)
+            manifest['workbench_work_id'] = checked['work_id']
+            manifest['script_id'] = checked['script_id']
             manifest['source_signatures'] = checked['source_signatures']
             (stage / 'manifest.json').write_text(json.dumps(manifest, ensure_ascii=False), encoding='utf-8')
             # Backup/rollback includes the manifest. Old results stay usable until all clips finish.
-            with self._publish_lock:
+            with self._publish_lock, self.store.connection() as db:
+                db.execute('BEGIN IMMEDIATE')
+                # Serialize publication against a rebind, and never publish a queued old identity.
+                current_inputs = self.select_inputs(checked['work_id'], checked['video_asset_id'])
+                if any(current_inputs[key] != checked[key] for key in
+                       ('script_id', 'preview_key', 'association_revision', 'video_path', 'scripts', 'matching_revision', 'source_signatures')):
+                    raise PreviewError('生成期间作品关联发生变化，请重新生成，保留旧预览', 409)
                 prior = stage / 'prior'
                 prior.mkdir()
                 names = [*expected, 'manifest.json']
@@ -434,7 +469,8 @@ class PreviewService:
                         no_symlinks(target)
                         (stage / filename).replace(target)
                         published.append(filename)
-                    self.save_previous(inputs['work_id'], inputs['script_id'])
+                    self.save_previous(inputs['work_id'], checked['preview_key'])
+                    db.execute('UPDATE works SET preview_stale=0 WHERE id=?', (checked['work_id'],))
                     publication['status'] = 'published'
                     self.write_json(journal, publication)
                 except BaseException:
