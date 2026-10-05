@@ -1,3 +1,4 @@
+import { useI18n, translate } from './i18n';
 import { CalendarDays } from 'lucide-react';
 import type { Work } from './api';
 
@@ -7,10 +8,11 @@ export function workDisplayTitle(work: Pick<Work, 'title' | 'script_id'>) {
 }
 
 export function ReleaseDates({ work }: { work: Work }) {
-  return <dl className="release-dates" aria-label={`${work.script_id} 发布日期`}>
+  useI18n();
+  return <dl className="release-dates" aria-label={translate('{id} 发布日期', { id: work.script_id })}>
     {(['patreon', 'es'] as const).map(platform => {
       const date = work[`${platform}_published_date`];
-      return <div key={platform}><dt><CalendarDays size={13} aria-hidden="true" />{platform === 'patreon' ? 'Patreon' : 'ES'} 发布</dt><dd>{date ? <time dateTime={date}>{date}</time> : <span className="release-date-empty">未记录</span>}</dd></div>;
+      return <div key={platform}><dt><CalendarDays size={13} aria-hidden="true" />{translate('{platform} 发布', { platform: platform === 'patreon' ? 'Patreon' : 'ES' })}</dt><dd>{date ? <time dateTime={date}>{date}</time> : <span className="release-date-empty">{translate("未记录")}</span>}</dd></div>;
     })}
   </dl>;
 }

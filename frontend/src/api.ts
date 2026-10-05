@@ -1,3 +1,5 @@
+import { getLanguage, translate as t } from './i18n';
+
 export type Status = 'pending' | 'published';
 export type Filter = 'all' | Status | 'es_published' | 'patreon_published';
 export interface Issue { type: string; message: string; script_id?: string; work_id?: number | null; paths?: string[] }
@@ -47,7 +49,8 @@ export interface Settings { roots: (string | Record<string, unknown>)[]; scan_in
 
 export class ApiError extends Error {
   status: number;
-  constructor(status: number, message: string) { super(message); this.status = status; this.name = 'ApiError'; }
+  rawMessage: string;
+  constructor(status: number, message: string) { super(message); this.status = status; this.rawMessage = message; this.name = 'ApiError'; }
 }
 export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(path, { ...init, headers: { ...(init.body ? { 'Content-Type': 'application/json' } : {}), ...init.headers } });
@@ -64,9 +67,9 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
 }
 export function errorMessage(error: unknown) { return error instanceof Error ? error.message : '操作失败，请稍后重试'; }
 export function formatDate(value?: string | null): string {
-  if (!value) return '尚无记录';
+  if (!value) return t('尚无记录');
   const date = new Date(value.endsWith('Z') || /[+-]\d\d:\d\d$/.test(value) ? value : `${value}Z`);
-  return Number.isNaN(date.valueOf()) ? value : new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(date);
+  return Number.isNaN(date.valueOf()) ? value : new Intl.DateTimeFormat(getLanguage().language, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Shanghai' }).format(date);
 }
 export function formatSize(bytes: number) {
   if (!Number.isFinite(bytes) || bytes < 0) return '—';
@@ -77,11 +80,11 @@ export function formatSize(bytes: number) {
 }
 export function isActiveJob(job?: Job | null) { return !!job && ['queued', 'pending', 'running'].includes(job.status); }
 export function jobLabel(status: string, type = 'scan') {
-  return ({ queued: '排队中', pending: '排队中', running: type === 'preview' ? '生成中' : type === 'rematch' ? '匹配中' : '扫描中', completed: '已完成', succeeded: '已完成', failed: '失败', interrupted: '已中断', cancelled: '已取消' } as Record<string, string>)[status] || status;
+  return t(({ queued: '排队中', pending: '排队中', running: type === 'preview' ? '生成中' : type === 'rematch' ? '匹配中' : '扫描中', completed: '已完成', succeeded: '已完成', failed: '失败', interrupted: '已中断', cancelled: '已取消' } as Record<string, string>)[status] || status);
 }
 export function displayValue(value: unknown): string {
   if (value === null || value === undefined || value === '') return '—';
-  if (typeof value === 'boolean') return value ? '是' : '否';
+  if (typeof value === 'boolean') return t(value ? '是' : '否');
   if (typeof value === 'object') return JSON.stringify(value, null, 2);
   return String(value);
 }
@@ -98,7 +101,7 @@ export function historyEntries(metadata: Record<string, unknown> = {}): [string,
   ];
   return fields.flatMap(([label, keys]) => {
     const key = keys.find(key => metadata[key] != null && String(metadata[key]).trim() !== '');
-    return key ? [[label, typeof metadata[key] === 'string' ? (metadata[key] as string).trim() : metadata[key]] as [string, unknown]] : [];
+    return key ? [[t(label), typeof metadata[key] === 'string' ? (metadata[key] as string).trim() : metadata[key]] as [string, unknown]] : [];
   });
 }
 export function safeLink(value: unknown): string | null {
