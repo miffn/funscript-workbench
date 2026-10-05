@@ -1,37 +1,48 @@
 # 脚本工作台部署指南
 
-部署方式：Windows 主机保存素材，WSL Ubuntu 24.04 运行 FastAPI、构建后的 React 页面和 SQLite。扫描、视频处理、模拟器渲染、GIF 压缩及热力图生成全部在 WSL 中执行；Windows 网关和自启动器仅负责网页入口、局域网转发、WSL 生命周期及资源管理器窗口。
+## 部署结构
+
+业务后端全部运行在 WSL Ubuntu 24.04：FastAPI 提供 API 和构建后的网页，SQLite 保存数据，FFmpeg、预览渲染器和 Python/Pillow 热力图程序处理素材。Windows 保存素材，并通过轻量网关提供局域网访问和打开资源管理器窗口；计划任务负责登录后启动及保持 WSL 运行。
+
+| 入口 | 地址 | 用途 |
+| --- | --- | --- |
+| WSL 后端 | `http://127.0.0.1:8789` | 网关连接的内部服务 |
+| Windows 本机 | `http://localhost:8788/` | 网页操作，可打开素材和预览目录 |
+| 局域网 | `http://<Windows IPv4>:8787/` | 手机及其他客户端访问，不支持打开主机文件夹 |
+
+素材目录在网页设置中添加、删除和勾选，保存在数据库中。保存配置后点击“立即扫描”才会扫描。原视频和脚本保持只读，生成结果写入独立预览目录。
 
 ## 1. 准备环境
 
-- Windows：WSL 2、Ubuntu 24.04、PowerShell 7、Python 3.12；Windows Python 仅运行网关，不处理素材，其可执行文件路径需要传给网关。
-- WSL：启用 systemd，安装 Python 3.12、Node.js 22.12 或更新版本、npm、Git、FFmpeg 和 C++ 构建依赖。本项目当前使用 Node.js 24。
-- 端口：WSL 后端 `127.0.0.1:8789`，Windows 本机入口 `127.0.0.1:8788`，局域网入口 `<Windows IPv4>:8787`。
-- 素材目录：部署后在网页设置中添加，可填写 Windows 盘符绝对路径或 WSL 绝对路径；新部署不预设个人素材目录。
+- Windows：WSL 2、Ubuntu 24.04、PowerShell 7、Python 3.12。Windows Python 只运行网关，无需安装后端依赖。
+- WSL：Python 3.12、Node.js 22.12 或更新版本、npm、Git、FFmpeg、CMake 和 C++ 构建依赖。
+- 本文以 `/home/user/projects/script-workbench` 为项目目录，WSL 用户为 `admin`；替换目录时也要调整后面的 Windows UNC 路径。
 
-在 WSL 终端检查 `systemctl --user status`、`node --version` 和 `npm --version`。若 WSL 未启用 systemd，在 `/etc/wsl.conf` 合并以下设置，再在 Windows 执行 `wsl --shutdown` 并重新打开 Ubuntu：
+在 WSL 中检查 `systemctl --user status`。若未启用 systemd，在 `/etc/wsl.conf` 合并以下配置，再在 Windows 执行 `wsl --shutdown` 并重新打开 Ubuntu：
 
 ```ini
 [boot]
 systemd=true
 ```
 
-在 WSL 终端安装其余依赖：
+在 WSL 中安装依赖：
 
 ```bash
 sudo apt update
 sudo apt install -y git python3.12 python3.12-venv ffmpeg build-essential cmake libegl1-mesa-dev libgl-dev libglm-dev
 ```
 
-Node.js 需单独准备符合版本要求的安装；不要直接使用版本过旧的系统包。
+Node.js 需另行安装符合要求的版本，用 `node --version` 和 `npm --version` 确认。
 
-## 2. 获取代码与构建
+当前 Windows 启动脚本还依赖 `%USERPROFILE%\.codex\bin\Invoke-WslProject.ps1` 及其配置文件。该执行器不在仓库内，换到新电脑需要另行准备并配置项目目录；它作为普通脚本运行，无需启动 Codex 应用。当前执行器支持 Ubuntu-24.04 下 `/home/user/projects` 内的项目。
 
-从仓库页面复制具有访问权限的克隆地址，替换下面的 `<仓库地址>`。代码应放在 WSL Linux 文件系统中。
+## 2. 获取代码并构建
+
+在 WSL Linux 文件系统中克隆公开仓库；也可替换成自己的 Forgejo 克隆地址：
 
 ```bash
 mkdir -p /home/user/projects
-git clone <仓库地址> /home/user/projects/script-workbench
+git clone https://github.com/miffn/funscript-workbench.git /home/user/projects/script-workbench
 cd /home/user/projects/script-workbench
 python3.12 -m venv .venv
 .venv/bin/python -m pip install -r backend/requirements.txt
@@ -42,15 +53,15 @@ cmake --build preview_generator/build -j4
 ctest --test-dir preview_generator/build --output-on-failure
 ```
 
-`frontend/dist` 是网页产物，`preview_generator/build/ofs-preview-renderer` 是预览渲染器。生产环境由后端同时提供网页和 API，无需另外启动 Vite。
+构建产物为 `frontend/dist` 和 `preview_generator/build/ofs-preview-renderer`。生产环境无需另外启动 Vite。
 
-检查所添加的素材目录在 WSL 中可读。生成结果默认写入项目的 `data/previews/`，也可通过环境变量指定独立输出目录；该目录需要写权限。预览输出目录不会被作为库存素材扫描。
+预览模型和渲染源码在 `preview_generator/`；热力图源码在 `backend/tools/heatmapgen/heatmapgen.py`，中文字体及 SIL OFL 许可随工具保存。Pillow 已包含在后端依赖中。所有生成工具均在 WSL 原生执行，业务后端无需 Windows EXE、Windows 字体或程序互操作。
 
-热力图源码集成在 `backend/tools/heatmapgen/heatmapgen.py`，由 WSL 虚拟环境中的 Python 和 Pillow 直接执行。中文字体随项目提供，路径为 `backend/tools/heatmapgen/fonts/NotoSansCJKsc-Regular.otf`，附带 SIL OFL 许可；无需依赖 Windows 字体或个人工具目录。预览渲染器源码和模型位于 `preview_generator/`，FFmpeg、FFprobe 和渲染器均使用 WSL 原生程序，业务后端不需要 Windows 程序互操作。后台自动传入所选各轴脚本的临时副本，无需手动启动工具或等待回车，原素材不会被改写。一次预览任务输出 4 个 WebM、4 个 GIF 和六轴布局的完整时长 `热力图.png`。项目移至另一位置后，在新目录重新构建渲染器并重新安装服务；系统依赖仍按上述步骤安装。
+一次预览任务生成 4 个 WebM、4 个 GIF 和完整时长的 `热力图.png`，可在网页中查看或下载。默认输出目录是 `data/previews/`，输出目录自动排除出库存扫描。素材目录可填写 Windows 绝对路径（例如 `E:\素材`）或 WSL 绝对路径；对应目录必须在 WSL 中可读。
 
-## 3. 初始化持久化目录
+## 3. 初始化数据并安装 WSL 服务
 
-在 WSL 项目目录执行以下命令。已有密钥不会被覆盖。
+在项目目录创建主机密钥；已有密钥保持原样：
 
 ```bash
 .venv/bin/python - <<'PY'
@@ -64,41 +75,46 @@ if not key.exists():
     key.write_text(secrets.token_hex(32), encoding='utf-8')
 key.chmod(0o600)
 PY
-```
-
-数据库 `data/workbench.sqlite3` 在后端首次启动时自动创建。`data/` 保存运行数据与密钥，不提交到 Git。
-
-## 4. 安装 WSL 服务
-
-```bash
 bash scripts/install-service.sh
 systemctl --user is-active script-workbench.service
 curl --fail http://127.0.0.1:8789/api/health
 ```
 
-预期服务状态为 `active`，健康接口返回 `status: ok`。后端只监听 loopback，由 Windows 网关转发。
+预期状态为 `active`，健康接口返回 `status: ok`。服务安装器启用用户 linger，后端不依赖终端会话。SQLite 数据库 `data/workbench.sqlite3` 在首次启动时自动创建。
 
-扫描目录在网页设置中添加、删除或启用，保存至 SQLite；升级会迁移已有目录配置，删除配置不会删除原文件、作品标签、链接或发布状态。保存目录不触发扫描，需要点击“立即扫描”。其他运行配置使用 `systemctl --user edit script-workbench.service` 添加环境变量覆盖，然后执行 `systemctl --user daemon-reload` 和 `systemctl --user restart script-workbench.service`。
+库存资料、扫描目录、标签、链接、发布状态及日期、日历、头像和界面语言均持久化到 SQLite。`data/` 保存数据库、密钥、缓存和运行数据，已排除出 Git。
 
-| 环境变量 | 默认值 |
+需要修改运行配置时，执行 `systemctl --user edit script-workbench.service`，例如指定项目之外的预览输出目录：
+
+```ini
+[Service]
+Environment="WORKBENCH_PREVIEW_OUTPUT_ROOT=/mnt/e/素材预览"
+```
+
+保存后执行：
+
+```bash
+systemctl --user daemon-reload
+systemctl --user restart script-workbench.service
+```
+
+| 环境变量 | 默认值及说明 |
 | --- | --- |
 | `WORKBENCH_DATA_DIR` | `<项目>/data` |
 | `WORKBENCH_HOST_KEY_FILE` | `<数据目录>/host.key` |
-| `WORKBENCH_ROOTS_JSON` | `[]`；仅首次初始化导入目录，后续以数据库配置为准 |
-| `WORKBENCH_PREVIEW_OUTPUT_ROOT` | `<项目>/data/previews` |
+| `WORKBENCH_ROOTS_JSON` | `[]`；仅首次初始化导入目录，之后以数据库配置为准 |
+| `WORKBENCH_PREVIEW_OUTPUT_ROOT` | `<数据目录>/previews`；需要写权限 |
 | `WORKBENCH_PREVIEW_RENDERER` | `<项目>/preview_generator/build/ofs-preview-renderer` |
-| `WORKBENCH_HEATMAP_TOOL` | `<项目>/backend/tools/heatmapgen/heatmapgen.py`（通常无需覆盖） |
-| `WORKBENCH_OPEN_MODE` | `gateway`；后端始终通过 Windows 网关请求打开文件夹 |
+| `WORKBENCH_HEATMAP_TOOL` | `<项目>/backend/tools/heatmapgen/heatmapgen.py`；通常无需覆盖，只支持 Python 源码 |
+| `WORKBENCH_OPEN_MODE` | `gateway`；后端始终向 Windows 网关返回打开目录请求 |
 
-后端只验证主机权限、同源请求及目录映射，返回经过编码的打开请求；Windows 网关验证授权目录后打开资源管理器。后端不会启动 `explorer.exe` 或其他 Windows 程序。网关跟随后端授权的目录配置打开文件夹，更换素材目录无需修改源码。改变数据目录或密钥位置时，也要给 Windows 网关传入同一密钥文件。
+自带 Windows 启动器使用 `<项目>/data/host.key`，建议保留默认数据及密钥位置。若改变这些位置，需同时调整 Windows 网关使用的密钥路径，使两端一致。
 
-## 5. 安装 Windows 自启动
+## 4. 配置 Windows 登录自启动
 
-Windows 自启动适配层不参与扫描或生成任务。自启动通过当前用户的 Windows 计划任务 `ScriptWorkbench` 托管，登录 Windows 后延迟 15 秒启动。启动器保存在 `%ProgramData%\ScriptWorkbench`，启动 WSL 后端、保持 WSL 运行并检查两个网页入口；后端或网关退出后自动重试。关闭 Codex、浏览器或启动命令窗口不影响计划任务。无需保存 Windows 密码，也不要求打开 Codex。
+在 Windows PowerShell 中执行。将项目 UNC 路径、局域网 IPv4 和 Windows Python 路径替换为实际值；显式传参可覆盖脚本中的默认值。
 
-安装前先确认 Windows 可读取 WSL 项目、Windows Python 的实际路径，以及本机局域网 IPv4。以下命令在 Windows PowerShell 中运行，将示例地址和 Python 路径替换为实际值。安装器依赖本机已有的 `C:\Users\<用户名>\.codex\bin\Invoke-WslProject.ps1` 及其 WSL 配置，该执行器作为普通脚本独立工作。
-
-先将安装器复制到 Windows 本地，避免 UNC 来源触发脚本签名限制：
+先复制安装器到 Windows 本地，避免 UNC 来源触发脚本签名限制：
 
 ```powershell
 $projectPath = '\\wsl.localhost\Ubuntu-24.04\home\user\projects\script-workbench'
@@ -110,11 +126,9 @@ Copy-Item -LiteralPath "$projectPath\scripts\Install-Autostart.ps1" -Destination
   -PythonPath 'C:\Path\To\Python312\python.exe'
 ```
 
-安装器立即启动任务，重复安装会刷新启动器和配置。运行目录只允许当前安装用户、管理员和系统写入。任务使用普通用户权限，无最长运行时间限制，避免多份同时运行；临时网络或 WSL 启动失败会重试。WSL 服务安装器启用用户 linger，使用户服务不依赖终端会话。
+安装器创建并立即启动计划任务 `ScriptWorkbench`。以后当前用户登录 Windows 后延迟 15 秒启动，后端或网关退出时自动重试。关闭 Codex、浏览器或终端不影响运行。启动器和配置保存在 `%ProgramData%\ScriptWorkbench`，重复安装会更新它们。此任务在用户登录后启动，未登录 Windows 时不会运行。
 
-这里的自动启动发生在该用户登录 Windows 后。未登录 Windows 时启动不在普通用户任务的覆盖范围内。
-
-管理员 PowerShell 中允许私有局域网访问 8787（已有规则时跳过）：
+在管理员 PowerShell 中允许私有局域网访问 8787，已有规则时跳过：
 
 ```powershell
 if (-not (Get-NetFirewallRule -Name 'ScriptWorkbench-LAN' -ErrorAction SilentlyContinue)) {
@@ -124,75 +138,51 @@ if (-not (Get-NetFirewallRule -Name 'ScriptWorkbench-LAN' -ErrorAction SilentlyC
 }
 ```
 
-## 6. 检查访问与持久化
+手机连接同一局域网后访问 `http://<Windows IPv4>:8787/`。局域网 IP 或 Windows Python 路径变化时，重新运行安装器。
 
-- 素材所在主机：`http://localhost:8788/`，可打开素材及预览目录。
-- 其他局域网设备：`http://<Windows IPv4>:8787/`，可查看和维护数据。
-- 本机和局域网入口的 `/api/health` 均应返回 `status: ok`。
-- `/api/capabilities` 的 `can_open_folder` 本机应为 `true`，局域网应为 `false`。
+## 5. 验证部署
 
-在作品详情点击生成结果的“查看”，可在网页内播放 WebM、查看 GIF 和热力图；热力图支持原尺寸查看，下载入口独立保留。内容按点击加载，关闭或切换预览会停止原视频。本机点击打开素材或预览目录后，网关会恢复并将对应资源管理器窗口显示到前台。
+1. 打开本机和局域网网页，确认两个入口的 `/api/health` 均返回 `status: ok`。
+2. 检查 `/api/capabilities`：本机的 `can_open_folder` 为 `true`，局域网为 `false`。
+3. 在设置中保存扫描目录，点击“立即扫描”；修改一条库存资料，刷新及重启后确认保留。
+4. 选择带有效视频和脚本的作品生成预览，确认网页能够查看 WebM、GIF 和热力图。本机打开目录时应显示对应资源管理器窗口。
+5. 重启电脑并登录安装任务的用户，确认网页自动恢复。
 
-发布链接编辑窗口可复制已保存的链接。首次填写并保存 Patreon / ES 帖子链接时，分别记录北京时间当天的发布日期；在作品详情可手动修改日期。更换或移除链接保留已有日期，旧链接不会被补记为升级当天。库存卡片显示两个平台的日期，只重复编号的标题不再单独展示。
+## 6. 停止、启动与日志
 
-侧栏“发布日历”同时显示发布计划和实际发布日期。选中日期，再选择 ES、Patreon 或两个平台，把库存拖入日期格，或点击“添加到当天”；手机和键盘也可使用该按钮。选择“记录实际发布”会保存对应平台的实际日期并标记已发布；选择“安排发布计划”只保存计划日期。计划和实际记录可同时保留，各平台独立维护，已有实际日期自动显示。同一天同一完整编号合并为一条记录，卡片内显示各平台及计划／实际状态，数量按编号计算；点击或拖动卡片内的对应平台可单独编辑或改期。
-
-拖动已有日历记录可改期，也可点击记录编辑日期或打开作品详情。移除计划不影响实际发布；移除实际日期保留发布状态和帖子链接。最近一次日历操作支持撤销；若之后有人修改该作品的发布资料，撤销会提示冲突，避免覆盖新资料。日历、库存和作品详情共用 SQLite，刷新或重启不会丢失日期；升级自动创建日历数据表，无需重新扫描。
-
-在设置中修改工作台头像、姓名和简介，头像可上传 PNG、JPEG 或 WebP 图片。这些资料及发布日期均保存在 SQLite，所有客户端共用，重启后保留。
-
-在设置的“界面语言”中选择简体中文或 English，切换后自动保存并立即更新界面。语言选择保存在 SQLite，刷新或重启后保留；其他已打开的客户端会在下一次语言检查时跟随切换。导航、库存详情、日历、预览、标签管理和设置均支持英语；作品标题、作者名、备注、链接、文件名和自定义标签不改写。
-
-库存详情的贴文生成入口和设置页的模板配置暂时隐藏，由 `frontend/src/features.ts` 中的 `SHOW_ES_POSTS` 控制。生成、编辑、导入程序仍保留；源码不附带个人主题、固定置顶编号或导航图片。已有模板、上传记录、历史封面及生成稿保留在 SQLite，升级不会覆盖；迁移时备份整个 `data/`。工作台仅在本地生成内容，发布由用户手动完成。
-
-若需要从已有的本地发帖工具迁移模板及封面历史，可在 WSL 项目目录显式指定自己的 JSON 文件：
-
-```bash
-.venv/bin/python -m backend.import_es_data --template /path/to/post-template.json --history /path/to/es-release-history.json
-```
-
-导入不会覆盖已有历史封面或已编辑模板；确需替换模板时添加 `--replace-template`。私有 JSON 文件不要提交到仓库，新部署不依赖原电脑的工具路径。
-
-在设置页添加并保存扫描目录，点击“立即扫描”初始化库存。修改一条库存的标签或 ES / Patreon 发布状态，刷新页面并重启服务后确认保留。两个平台独立维护、独立筛选；保存非空 ES 帖子链接会自动标记 ES 已发布。旧数据库升级时，原“已发布”迁移为两个平台均已发布，原“待发布”保留为待发布，有有效 ES 链接的作品补标 ES 已发布。新部署从本地目录与自己的数据库开始，扫描不会自动发生。
-
-每个完整编号只关联一个当前素材目录。在已启用的扫描目录之间移动编号文件夹后，手动扫描或在作品详情点击“重新匹配文件”，即可刷新路径、素材清单及已有轴类型标签；多个同轴脚本仍为单轴，不同轴脚本识别为多轴。作者等其他标签、链接、发布日期和人工信息保留。明确清空的轴类型标签不会自动补回。同一编号出现多个有效文件夹时提示冲突，暂停绑定与预览生成；处理重复编号后重新匹配。历史扫描路径仅用于失联恢复，不再显示为其他绑定目录。
-
-左侧“待制作”收纳已有编号目录但没有脚本的作品，进入后即使补齐脚本也不会自动移出。先扫描或重新匹配，再在作品详情点击“确认制作完成”；有可用脚本且任一平台尚未发布时，才会进入“待发布”。确认前会检查目录、脚本和后台任务，确认记录持久化到 SQLite。旧的已带脚本库存沿用既有发布状态；移除全部脚本后再次扫描，会回到待制作并需要重新确认。分类变化不修改标题、标签、链接或实际发布记录。
-
-手动扫描或重新匹配文件时，自动读取当前完整编号关联的全部源视频时长，先累加秒数，再四舍五入成“时间 N 分钟”标签。Preview／预览目录、已识别的生成预览片段和 `.partial` 临时下载不计入。该标签可筛选但不能手动修改。读取结果及按文件大小、修改时间识别的缓存保存在 SQLite；读取不完整或文件暂不可用时显示状态提示，不将缺失时长算作零。
-
-电脑重启并登录安装任务的 Windows 用户后自动启动。局域网 IP 或 Python 路径改变时重新运行安装器更新配置。
-
-## 7. 停止、更新与日志
-
-Codex 可通过发帖 skill 直接调用工作台接口，复用同一份数据库模板、资料、上传记录和生成稿，无需再次导出腾讯文档。在运行工作台的 WSL 项目目录检查连接：
-
-```bash
-.venv/bin/python scripts/workbench_client.py health
-.venv/bin/python scripts/workbench_client.py inspect --script-id S064
-.venv/bin/python scripts/workbench_client.py generate --script-id S064
-```
-
-服务地址默认为 `http://127.0.0.1:8789`，可通过 `--base-url` 或 `WORKBENCH_API_URL` 指定。`generate` 使用数据库中已保存的资料，正文导出到 `data/generated-posts/`，标题单独返回；缺少上传 Markdown 等资料时明确返回 `draft` 和缺项。用户提供新的上传 Markdown 后，用 `save-inputs --script-id <ID> --inputs-json <JSON文件>` 保存修改字段，未提供的字段保留。`save-cover` 独立保存预览封面。实际手动发布后，可用 `record-es-link --script-id <ID> --es-url <实际帖子链接>` 回填 ES 链接、状态和默认日期。这些命令不会登录、上传或发布 ES 帖子。
-
-Windows Codex 的 `prepare-es-release-post` skill 使用其 `references/workbench-connection.json` 指定实际 WSL 项目和接口地址，由 `scripts/Invoke-Workbench.ps1` 通过 WSL 执行器启动上面的客户端。移动工作台后更新这一连接配置即可；不需要新增后台进程或 MCP 服务。
-
-启动已安装的任务：
-
-```powershell
-Start-ScheduledTask -TaskName 'ScriptWorkbench'
-```
-
-停止当前任务、网关与后端：
+在 Windows PowerShell 中停止计划任务、网关和后端：
 
 ```powershell
 $projectPath = '\\wsl.localhost\Ubuntu-24.04\home\user\projects\script-workbench'
 & "$env:ProgramData\ScriptWorkbench\Stop-Workbench.ps1" -ProjectPath $projectPath
 ```
 
-停止脚本先停止守护任务，避免网关被再次拉起；下次登录仍会自启动。如需取消以后自动启动，在停止后执行 `Disable-ScheduledTask -TaskName 'ScriptWorkbench'`；恢复时执行 `Enable-ScheduledTask -TaskName 'ScriptWorkbench'` 后再启动任务。
+再次启动：
 
-更新前先停止网关及服务并备份数据，然后在 WSL 项目目录执行：
+```powershell
+Start-ScheduledTask -TaskName 'ScriptWorkbench'
+```
+
+停止后下次登录仍会自动启动。要取消自启动，执行 `Disable-ScheduledTask -TaskName 'ScriptWorkbench'`；恢复时先 `Enable-ScheduledTask -TaskName 'ScriptWorkbench'`，再启动任务。
+
+WSL 后端日志：
+
+```bash
+journalctl --user -u script-workbench.service -n 100 --no-pager
+```
+
+Windows 日志与状态：
+
+- 自启动日志：`%ProgramData%\ScriptWorkbench\autostart.log`。
+- WSL 保活错误：`%ProgramData%\ScriptWorkbench\keeper.stderr.log`。
+- 网关日志：`<项目>\data\gateway.stdout.log`、`gateway.stderr.log`。
+- 计划任务状态：`Get-ScheduledTask -TaskName ScriptWorkbench`。
+
+后端不可达时先检查服务日志和 8789 健康接口；手机不可达时检查 Windows IPv4、网络是否为“专用”以及 8787 防火墙规则。预览失败时检查 WSL 素材读取权限、输出目录写权限，以及渲染器是否已构建。
+
+## 7. 更新及迁移到 WSL 原生热力图
+
+先等待生成任务结束，用上面的 Windows 停止命令停止网关和后端，并按下一节备份数据。在 WSL 项目目录更新：
 
 ```bash
 git pull --ff-only
@@ -201,22 +191,18 @@ npm --prefix frontend ci
 npm --prefix frontend run build
 cmake -S preview_generator -B preview_generator/build -DCMAKE_BUILD_TYPE=Release
 cmake --build preview_generator/build -j4
-systemctl --user start script-workbench.service
+ctest --test-dir preview_generator/build --output-on-failure
 ```
 
-更新启动脚本后重新运行安装器，将新版本复制到 Windows 运行目录，再启动计划任务。保留 `data/`，更新代码不会重建或清空数据库。
+从旧版 Windows 热力图工具升级时，检查 systemd 的环境覆盖。如果曾设置 `WORKBENCH_HEATMAP_TOOL` 指向 `.exe`，删除该覆盖以恢复内置 Python 程序。检查 `WORKBENCH_PREVIEW_RENDERER`、`WORKBENCH_FFMPEG` 和 `WORKBENCH_FFPROBE`，确保使用 WSL 原生程序；默认 FFmpeg / FFprobe 从 WSL 的 PATH 查找。
 
-后端日志：
+保留 `data/`，启动计划任务恢复服务。数据库升级自动执行；既有资料和预览文件保留，下一次生成任务按新的热力图程序指纹检查缓存。
 
-```bash
-journalctl --user -u script-workbench.service -n 100 --no-pager
-```
-
-自启动日志：`%ProgramData%\ScriptWorkbench\autostart.log`，WSL 保活错误：同目录 `keeper.stderr.log`；任务状态：`Get-ScheduledTask -TaskName ScriptWorkbench`。网关日志：`data/gateway.stdout.log`、`data/gateway.stderr.log`。若网关报告 WSL 服务不可用，先检查后端健康接口；若局域网不可达，检查 Windows IPv4、网络配置文件和 8787 防火墙规则。
+如果启动脚本更新或项目目录移动，按第 4 节重新安装 Windows 自启动。移动项目时还需在新目录重建 `.venv`、前端和渲染器，运行 `bash scripts/install-service.sh` 更新服务路径，并检查 systemd 中自定义的绝对路径。
 
 ## 8. 备份与恢复
 
-停止网关及后端后，在 WSL 中备份整个 `data/`：
+先停止网关及后端，在 WSL 项目目录备份整个 `data/`：
 
 ```bash
 mkdir -p /home/user/backups
@@ -224,4 +210,6 @@ backup_file="/home/user/backups/script-workbench-data-$(date +%Y%m%d-%H%M%S).tar
 tar -czf "$backup_file" data
 ```
 
-恢复时先停止服务，将备份的 `data/` 恢复到同一项目目录，保留数据库与 `host.key`，再启动后端及网关。运行中的 SQLite 不应只复制主数据库文件；停机备份可同时保留 WAL 等配套文件。若配置了项目之外的预览输出目录，该目录中的成品需要另行备份。备份包含私有运行数据和密钥，保存在受控位置。
+恢复时先停止服务，将备份的 `data/` 恢复到项目目录，保留数据库和 `host.key`，再启动计划任务。运行中的 SQLite 不应只复制主数据库文件；停机备份整个目录可同时保留 WAL 等配套文件。
+
+项目之外的预览输出目录需另行备份，原素材也需单独备份。备份包含私有运行数据及密钥，应保存在受控位置，不提交到仓库。
