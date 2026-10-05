@@ -203,7 +203,7 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
         row = db.execute("SELECT value FROM settings WHERE key='last_scan'").fetchone()
         return json.loads(row[0]) if row else None
 
-    def details(db, work, include_assets=False) -> dict:
+    def details(db, work, include_assets=False, *, check_filesystem=True) -> dict:
         record = dict(work)
         record['data_revision'] = work_data_revision(work)
         record['es_published'] = bool(record['es_published'])
@@ -226,10 +226,12 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
         record["video_type"] = selected_type if selected_type is not None else "" if manual_tags and manual_tags[0] else metadata.get("video_type") or metadata.get("Video Type") or ""
         record["axis_type"] = next((tag["name"] for tag in record["tags"] if tag["category"] == "axis_type"), "")
         latest = last_scan(db) or {}
-        registered_roots = {str(root.path) for root in scan_roots.roots(db)}
+        roots = scan_roots.roots(db)
+        registered_roots = {str(root.path) for root in roots}
         unavailable_roots = latest.get("unavailable_roots", [])
         directory = current_directory(db, record['id'])
-        record['association_status'] = directory_status(db, record['id'], scan_roots.roots(db))
+        record['association_status'] = directory_status(db, record['id'], roots,
+            check_filesystem=check_filesystem, unavailable_roots=unavailable_roots)
         directories = [dict(directory)] if directory is not None else []
         for directory in directories:
             directory["available"] = bool(directory["available"]) and record['association_status'] == 'available' and directory["root_path"] not in unavailable_roots and directory['root_path'] in registered_roots
@@ -242,7 +244,7 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
         record["script_count"] = sum(asset["kind"] == "script" and asset["directory_id"] in counted_ids for asset in assets)
         record["issues"] = [{"type": row["type"], "message": row["message"]} for row in db.execute("SELECT type,message FROM issues WHERE work_id=? ORDER BY id", (record["id"],))]
         cover = db.execute("SELECT * FROM covers WHERE work_id=?", (record["id"],)).fetchone()
-        record["cover_url"] = f"/api/covers/{record['id']}?v={cover['fingerprint'][:20]}" if cover and cover["path"] and Path(cover["path"]).is_file() else None
+        record["cover_url"] = f"/api/covers/{record['id']}?v={cover['fingerprint'][:20]}" if cover and cover["path"] and (not check_filesystem or Path(cover["path"]).is_file()) else None
         if include_assets:
             record["assets"] = assets
         return record
@@ -310,7 +312,7 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
         return {"status": "ok", "service": "script-workbench"}
 
     def script_groups(db):
-        # Use the same current directory and cached-source rules as work details.
+        # Classification uses persisted scan results, never probes material storage.
         registered = {str(root.path) for root in scan_roots.roots(db)}
         unavailable = set((last_scan(db) or {}).get('unavailable_roots', []))
         script_directories = {row[0] for row in db.execute("SELECT DISTINCT directory_id FROM assets WHERE kind='script'")}
@@ -321,7 +323,8 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
             directory = current_directory(db, row[0])
             if directory is None:
                 continue
-            association = directory_status(db, row[0], roots)
+            association = directory_status(db, row[0], roots,
+                check_filesystem=False, unavailable_roots=unavailable)
             if association in {'missing', 'conflict', 'unlinked'}:
                 continue
             if directory['available'] or association == 'unavailable' or directory['root_path'] in unavailable or directory['root_path'] not in registered:
@@ -372,7 +375,7 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
                      "es_published": db.execute("SELECT count(*) FROM works WHERE es_published=1").fetchone()[0],
                      "patreon_published": db.execute("SELECT count(*) FROM works WHERE patreon_published=1").fetchone()[0],
                      "issues": db.execute("SELECT count(DISTINCT work_id) FROM issues WHERE work_id IS NOT NULL").fetchone()[0]}
-            return {"items": [details(db, row) for row in rows], "total": total, "page": page,
+            return {"items": [details(db, row, check_filesystem=False) for row in rows], "total": total, "page": page,
                     "page_size": page_size, "stats": stats, "last_scan": last_scan(db)}
 
     @app.get("/api/works/{work_id}")
