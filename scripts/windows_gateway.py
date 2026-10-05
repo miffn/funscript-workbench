@@ -187,6 +187,8 @@ class GatewayHandler(BaseHTTPRequestHandler):
             return self.fail(403, "不支持此访问地址")
         if not self.path.startswith("/") or self.path.startswith("//"):
             return self.fail(400, "请求路径无效")
+        if self.path == '/mcp' and len(self.headers.get_all('Authorization', [])) > 1:
+            return self.fail(401, 'MCP Authorization 必须唯一')
         if self.command not in {"GET", "HEAD", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"}:
             return self.fail(405, "不支持此请求方法")
         if self.command in {"POST", "PATCH", "PUT", "DELETE"}:

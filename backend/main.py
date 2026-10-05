@@ -28,6 +28,7 @@ from .es_posts import register_es_post_routes
 from .release_calendar import register_release_calendar_routes
 from .work_directory import current_directory
 from .mcp_server import create_workbench_mcp, mcp_http_app
+from .mcp_auth import MCPAuth, register_mcp_auth_routes
 
 
 ReleaseDate = Annotated[str | None, BeforeValidator(validate_release_date)]
@@ -239,6 +240,9 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
         origin = request.headers.get("origin", "")
         if origin not in {"http://localhost:8788", "http://127.0.0.1:8788"} or urlparse(origin).netloc.lower() != request.headers.get("host", "").lower():
             raise HTTPException(403, "目录打开仅允许素材主机网页的同源请求")
+
+    mcp_auth = MCPAuth(store)
+    register_mcp_auth_routes(app, mcp_auth, host_capability)
 
     def send_open_request(windows_path: str, windows_root: str):
         encoded = base64.urlsafe_b64encode(windows_path.encode("utf-8")).decode("ascii")
@@ -605,7 +609,7 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
         return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=3600", "ETag": f'"{cover["fingerprint"]}"'})
 
     app.state.mcp = create_workbench_mcp(app)
-    app.add_route("/mcp", mcp_http_app(app.state.mcp), methods=["GET", "POST", "DELETE"])
+    app.add_route("/mcp", mcp_http_app(app.state.mcp, mcp_auth), methods=["GET", "POST", "DELETE"])
 
     @app.get("/{frontend_path:path}", include_in_schema=False)
     def frontend(frontend_path: str):

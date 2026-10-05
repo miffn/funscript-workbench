@@ -223,24 +223,33 @@ MCP 随 WSL 后端一起启动，复用当前工作台 API 和数据库，无需
 | 同一局域网内的其他电脑 | `http://<Windows IPv4>:8787/mcp` |
 | WSL 内 | `http://127.0.0.1:8789/mcp` |
 
-客户端必须能访问所填写的工作台地址。此部署采用和网页相同的本机／局域网访问范围，没有独立账号认证；云端 AI 服务无法直接连接本机的 localhost 或局域网地址。
+客户端必须能访问所填写的工作台地址；云端 AI 服务无法直接连接本机的 localhost 或局域网地址。
 
-网页设置中的“连接 AI Agent”提供 Codex 和 Claude Code 的一键接入命令，以及独立的 MCP 地址复制按钮。命令按当前网页地址生成：其他电脑请通过局域网入口打开工作台后复制，在已安装对应 Agent 客户端的电脑终端执行。复制成功表示命令已进入剪贴板，执行后才会添加 Agent 连接配置。
+MCP 强制使用 `Authorization: Bearer <Token>` 验证，未提供、错误或已失效的 Token 返回 `401`。升级后旧的无认证连接不再可用；未生成 Token 时 MCP 保持锁定，网页正常使用。首次连接请在素材所在 Windows 主机通过 `http://localhost:8788/#/settings` 打开“连接 AI Agent”，生成 Token。Token 只在生成或重置时返回一次，数据库只保存校验摘要；请保存复制出的配置，刷新后可填入已保存的 Token。重置需要确认，旧 Token 立即失效。局域网客户端可填写已有 Token 生成配置，不能生成或重置 Token。
 
-在支持 HTTP MCP 的其他 AI 客户端中填写 MCP 地址。本机 Codex 也可使用以下命令，连接配置保存在用户的 Codex 配置中：
+设置页统一提供通用接入命令、通用 MCP JSON 配置和地址复制，不区分 Agent 客户端。地址跟随当前网页：其他电脑应从局域网入口复制，避免把 localhost 当成 Windows 主机地址。通用命令需要客户端电脑安装 Node.js，使用 `mcp-remote` 将本地 stdio MCP 转接到工作台的 Streamable HTTP 接口：
 
-```powershell
-codex mcp add funscript-workbench --url http://localhost:8788/mcp
+```bash
+npx -y mcp-remote "http://localhost:8788/mcp" --allow-http --transport http-only --header "Authorization: Bearer <Token>"
 ```
 
-也可在 Codex 的 `config.toml` 中配置：
+这是一条 MCP 启动命令，在终端运行不会自动为所有 Agent 注册服务。将其添加到 Agent 的 MCP 服务配置中，或复制设置页的 JSON 配置交给 Agent 按客户端格式添加。JSON 配置使用环境变量传递认证头，避免 Windows 客户端参数中的空格问题；示例 Token 是占位符，不是可用凭据：
 
-```toml
-[mcp_servers.funscript-workbench]
-url = "http://localhost:8788/mcp"
+```json
+{
+  "mcpServers": {
+    "funscript-workbench": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "http://localhost:8788/mcp", "--allow-http", "--transport", "http-only", "--header", "Authorization:${WORKBENCH_MCP_AUTH}"],
+      "env": {"WORKBENCH_MCP_AUTH": "Bearer <Token>"}
+    }
+  }
+}
 ```
 
-其他电脑应使用局域网地址。配置方式参见 [OpenAI 官方 MCP 文档](https://developers.openai.com/codex/mcp)。更新已有部署时先安装新的后端依赖，再重启 WSL 服务及 Windows 网关；后端和网关都需要更新，才能接受不带网页 Origin 的 MCP 客户端请求。
+支持原生 HTTP MCP 的 Agent 也可直接配置工作台 URL 和 Authorization 请求头，无需转接。Agent 的配置文件结构可能不同，请按其文档添加；参考 [mcp-remote 官方说明](https://github.com/punkpeye/mcp-remote)。MCP Token 仅用于 MCP，网页沿用本机／局域网访问方式；HTTP 不加密传输。带 Token 的命令和配置属于凭据，不放入 Git、日志或公开聊天。
+
+更新已有部署时安装后端依赖、重新构建前端并重启 WSL 服务。Windows 网关需支持固定 `/mcp` 接口无 Origin 的原生请求（其余写接口仍检查同源），不会跳过后端的 Token 验证。
 
 提供以下只读工具：
 

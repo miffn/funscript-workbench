@@ -35,8 +35,9 @@ def allowed_mcp_host(host: str) -> bool:
 
 class MCPHostGuard:
     """Gateway validates its exact LAN IP; direct WSL access stays loopback-only."""
-    def __init__(self, app):
+    def __init__(self, app, auth):
         self.app = app
+        self.auth = auth
 
     async def __call__(self, scope, receive, send):
         if scope['type'] == 'http':
@@ -49,6 +50,10 @@ class MCPHostGuard:
             if not allowed_mcp_host(host) or (origin is not None and origin != f'http://{host}'.encode()):
                 return await JSONResponse({'detail': 'MCP only accepts workbench host addresses and same-origin requests'},
                                           status_code=403)(scope, receive, send)
+            authorization = [value.decode('latin1') for name, value in scope['headers'] if name == b'authorization']
+            if len(authorization) != 1 or not self.auth.accepts(authorization[0]):
+                return await JSONResponse({'detail': 'Valid MCP bearer token required'}, status_code=401,
+                                          headers={'WWW-Authenticate': 'Bearer', 'Cache-Control': 'no-store'})(scope, receive, send)
         await self.app(scope, receive, send)
 
 
@@ -165,9 +170,9 @@ def create_workbench_mcp(app) -> MCPServer:
     return server
 
 
-def mcp_http_app(server):
+def mcp_http_app(server, auth):
     # Our guard supports dynamic private LAN IPs; the gateway still checks its exact IP.
     return MCPHostGuard(server.streamable_http_app(
         streamable_http_path='/mcp', stateless_http=True, json_response=True,
         transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
-    ))
+    ), auth)

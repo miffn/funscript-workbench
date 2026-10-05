@@ -19,6 +19,7 @@ class EchoHandler(BaseHTTPRequestHandler):
                              "folder": self.headers.get("X-Workbench-Open-Folder"),
                              "folder_root": self.headers.get("X-Workbench-Folder-Root"),
                              "origin": self.headers.get("Origin"),
+                             "authorization": self.headers.get("Authorization"),
                              "body": self.rfile.read(length).decode()}).encode()
         self.send_response(200)
         if self.path.endswith("/open-folder"):
@@ -92,6 +93,32 @@ def test_connection_header_cannot_smuggle_host_key(gateways):
     local, remote = gateways
     headers = {"Host": "192.0.2.6:8787", "Connection": "X-Workbench-Host-Key", "X-Workbench-Host-Key": "spoof"}
     assert json.loads(request(remote, headers=headers)[1])["key"] is None
+
+
+def test_mcp_bearer_header_reaches_backend_without_granting_lan_host_capability(gateways):
+    local, remote = gateways
+    for server, host in [(local, 'localhost:8788'), (remote, '192.0.2.6:8787')]:
+        status, body = request(server, 'POST', {'Host': host, 'Authorization': 'Bearer test-token',
+                                              'X-Workbench-Host-Key': 'forged'}, '{}', '/mcp')
+        assert status == 200
+        echoed = json.loads(body)
+        assert echoed['authorization'] == 'Bearer test-token'
+        assert echoed['key'] == ('trusted-secret' if server is local else None)
+
+
+def test_gateway_rejects_duplicate_mcp_credentials_before_header_forwarding(gateways):
+    for server, host in [(gateways[0], 'localhost:8788'), (gateways[1], '192.0.2.6:8787')]:
+        conn = http.client.HTTPConnection('127.0.0.1', server.server_port)
+        conn.putrequest('POST', '/mcp', skip_host=True)
+        conn.putheader('Host', host)
+        conn.putheader('Authorization', 'Bearer first')
+        conn.putheader('Authorization', 'Bearer second')
+        conn.putheader('Content-Length', '0')
+        conn.endheaders()
+        response = conn.getresponse()
+        assert response.status == 401
+        response.read()
+        conn.close()
 
 
 def test_only_local_open_route_launches_folder(gateways, monkeypatch):

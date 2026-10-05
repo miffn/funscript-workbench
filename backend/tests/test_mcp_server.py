@@ -7,6 +7,7 @@ import pytest
 from backend.config import Config, Root
 from backend.main import create_app
 from backend.store import now
+from backend.mcp_auth import MCPAuth
 
 HEADERS = {'Accept': 'application/json, text/event-stream'}
 
@@ -56,6 +57,8 @@ def mcp_client(tmp_path):
         db.execute('INSERT INTO work_tags(work_id,tag_id) VALUES(?,?)', (parent_id, tag_id))
         db.execute("UPDATE works SET es_published=1, es_published_date='2026-10-03' WHERE id=?", (parent_id,))
     with TestClient(app, base_url='http://127.0.0.1:8789') as client:
+        token = MCPAuth(app.state.store).reset(0)['token']
+        client.headers['Authorization'] = f'Bearer {token}'
         yield client, app
 
 
