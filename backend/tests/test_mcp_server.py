@@ -68,8 +68,12 @@ def test_initialize_catalog_and_frontend_remain_accessible(mcp_client):
                                             'clientInfo': {'name': 'test', 'version': '1'}})['result']
     assert initialized['serverInfo']['name'] == 'funscript-workbench'
     tools = rpc(client, 'tools/list')['result']['tools']
-    assert len(tools) == 9
-    assert all(tool['annotations']['readOnlyHint'] and not tool['annotations']['destructiveHint'] for tool in tools)
+    assert len(tools) == 18
+    read_tools = [tool for tool in tools if tool['annotations']['readOnlyHint']]
+    write_tools = [tool for tool in tools if not tool['annotations']['readOnlyHint']]
+    assert len(read_tools) == len(write_tools) == 9
+    assert all(not tool['annotations']['destructiveHint'] for tool in read_tools)
+    assert all(tool['annotations']['destructiveHint'] for tool in write_tools)
     assert client.get('/').status_code == 200
     assert client.get('/api/health').json()['status'] == 'ok'
     assert client.get('/mcp').status_code == 405  # Stateless JSON transport has no endless GET stream.
@@ -80,6 +84,8 @@ def test_read_tools_use_ui_rules_exact_child_and_do_not_write(mcp_client):
     with app.state.store.connection() as db:
         before = '\n'.join(db.iterdump())
     overview = data(call(client, 'workbench_get_overview'))
+    assert overview['read_only'] is False and overview['capabilities']['maintain_data'] is True
+    assert not overview['capabilities']['run_jobs'] and not overview['capabilities']['confirm_production']
     assert overview['stats']['total'] == 3 and overview['stats']['to_make'] == 1
     assert data(call(client, 'workbench_list_works', {'status': 'to_make'}))['items'][0]['script_id'] == 'S064'
     assert {item['script_id'] for item in data(call(client, 'workbench_list_works', {'status': 'pending'}))['items']} == {'S025', 'S025_001'}

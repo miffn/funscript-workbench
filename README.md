@@ -213,7 +213,7 @@ tar -czf "$backup_file" data
 恢复时先停止服务，将备份的 `data/` 恢复到项目目录，保留数据库和 `host.key`，再启动计划任务。运行中的 SQLite 不应只复制主数据库文件；停机备份整个目录可同时保留 WAL 等配套文件。
 
 项目之外的预览输出目录需另行备份，原素材也需单独备份。备份包含私有运行数据及密钥，应保存在受控位置，不提交到仓库。
-## 9. 连接 AI：只读 MCP
+## 9. 连接 AI：MCP 资料维护
 
 MCP 随 WSL 后端一起启动，复用当前工作台 API 和数据库，无需单独运行工具。协议为 Streamable HTTP，使用 JSON 响应；无需另开端口。
 
@@ -251,7 +251,7 @@ npx -y mcp-remote "http://localhost:8788/mcp" --allow-http --transport http-only
 
 更新已有部署时安装后端依赖、重新构建前端并重启 WSL 服务。Windows 网关需支持固定 `/mcp` 接口无 Origin 的原生请求（其余写接口仍检查同源），不会跳过后端的 Token 验证。
 
-提供以下只读工具：
+提供以下读取工具：
 
 | 工具 | 读取内容 |
 | --- | --- |
@@ -262,7 +262,25 @@ npx -y mcp-remote "http://localhost:8788/mcp" --allow-http --transport http-only
 | `workbench_get_release_calendar` | 指定 `YYYY-MM` 的计划及实际发布记录 |
 | `workbench_get_preview` | 已生成视频、GIF、热力图的文件 URL 和任务进度 |
 | `workbench_get_jobs` | 指定任务或最近 50 个任务的状态 |
-| `workbench_get_settings` | 扫描目录和工作台姓名、简介；不返回主机密钥或头像二进制 |
+| `workbench_get_settings` | 扫描目录、工作台姓名／简介和界面语言；不返回主机密钥或头像二进制 |
 | `workbench_get_post_materials` | 已保存的 ES 模板、贴文输入和生成稿 |
 
-查询使用网页当前维护的数据，不自动扫描、修改资料、生成素材、打开文件夹或发布贴文。`S025` 和 `S025_001` 分别读取；计划日期与实际发布日期分别返回。AI 可以据此回答“有哪些待发布的多轴作品”“读取 S064 的发布资料”“查看 2026-10 的发布安排”等请求。
+提供以下资料维护工具，既有有效 Token 同时授权读取和这些修改操作，不需要重新生成 Token。客户端重新连接后可发现新增工具：
+
+| 工具 | 修改内容 |
+| --- | --- |
+| `workbench_update_work` | 完整编号对应作品的标题、备注、ES／Patreon 状态与实际发布日期 |
+| `workbench_create_tag` | 新增标签及作者支持链接 |
+| `workbench_update_tag` | 编辑标签名称、支持状态或支持链接 |
+| `workbench_set_work_tags` | 替换作品关联标签；保留想继续使用的标签 ID |
+| `workbench_update_work_links` | 编辑 Patreon／视频／脚本／ES 链接和平台日期，沿用网页默认日期及 ES 已发布规则 |
+| `workbench_update_release_calendar` | 维护指定平台的实际日期或计划日期 |
+| `workbench_undo_calendar_operation` | 撤销未被后续编辑覆盖的日历操作 |
+| `workbench_update_profile` | 修改工作台姓名与简介，保留头像 |
+| `workbench_update_language` | 修改共享界面语言 |
+
+先读取当前作品或设置，再提交修改。作品使用 `data_revision`，作品标签使用 `tags_revision`，作品链接使用 `links_revision`；共享标签、工作台资料和语言使用各自的 `revision`，日历使用日历条目的 `revision`。将对应值放入修改参数 `edit.expected_revision`；新增标签无需版本。工具参数和字段格式可从 MCP 工具列表查询。版本不一致返回 `409` 工具错误，应重新读取、核对用户意图后再修改，不自动重试覆盖。
+
+资料维护通过网页相同的 API 校验并持久化到 SQLite，重启或扫描不会抹掉人工维护字段。`S025` 和 `S025_001` 分别维护；计划日期与实际发布日期分别返回。日期可填 `null` 清空，省略字段保留原值。替换标签会改变关联；修改共享作者标签会影响所有绑定该标签的作品。
+
+AI 应仅按用户明确要求修改资料。MCP 不开放库存扫描、文件重新匹配、生成预览、确认制作完成、打开主机文件夹、Token 管理或实际网站发布；原始视频及脚本保持只读。AI 可回答“有哪些待发布的多轴作品”，也可以在用户要求时“给 S064 添加作者标签”或“将 S064 的 ES 发布日期设为指定日期”。

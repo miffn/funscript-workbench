@@ -40,7 +40,7 @@ export const core: Record<string, string> = {
   'MCP 地址已复制。': 'MCP address copied.',
   '复制失败，请选中上方内容手动复制。': 'Copy failed. Select the text above and copy it manually.',
   '地址跟随当前网页，Agent 需能访问此地址；其他电脑请从局域网地址打开工作台后复制。': 'The address follows this page and must be reachable by the agent. On another computer, open the workbench through its LAN address before copying.',
-  '接入后可读取库存、标签、发布链接、日历和预览信息。当前 MCP 为只读。': 'Once connected, the agent can read inventory, tags, release links, calendars and previews. This MCP provides read-only access.',
+  '接入后可读取库存与预览信息，并维护作品标题、备注、标签、链接、发布状态与日期及日历。Token 同时授权读取和资料维护。原始视频与脚本只读，不执行扫描、匹配、预览生成或网站发帖。': 'Once connected, the agent can read inventory and preview information, and maintain work titles, notes, tags, links, publication statuses and dates, and calendar entries. The token authorizes both reading and data maintenance. Original videos and scripts remain read-only. Scanning, file matching, preview generation and website publishing are unavailable.',
   '界面语言': 'Interface language',
   '未找到 WSL 热力图程序，请检查内置源码': 'The native WSL heatmap renderer is missing. Check the bundled source.',
   '热力图需要 Python 源码程序，不能使用 Windows EXE': 'The heatmap renderer must be a Python source file. Windows EXE files are not supported.',

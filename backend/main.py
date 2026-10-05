@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 from contextlib import asynccontextmanager
 import hmac
+import hashlib
 import json
 from pathlib import Path, PureWindowsPath
 from urllib.parse import urlparse
@@ -43,6 +44,13 @@ class WorkEdit(BaseModel):
     es_published_date: ReleaseDate = None
     patreon_published_date: ReleaseDate = None
     notes: str | None = Field(default=None, max_length=20000)
+    expected_revision: str | None = Field(default=None, strict=True, pattern=r'^[a-f0-9]{64}$')
+
+
+def work_data_revision(work) -> str:
+    """Fingerprint raw persisted fields, independent of derived UI fields."""
+    return hashlib.sha256(json.dumps(dict(work), sort_keys=True, ensure_ascii=False,
+                                     separators=(',', ':')).encode()).hexdigest()
 
 
 class OpenFolder(BaseModel):
@@ -178,6 +186,7 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
 
     def details(db, work, include_assets=False) -> dict:
         record = dict(work)
+        record['data_revision'] = work_data_revision(work)
         record['es_published'] = bool(record['es_published'])
         record['patreon_published'] = bool(record['patreon_published'])
         record['production_required'] = bool(record['production_required'])
@@ -425,6 +434,7 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
     @app.patch("/api/works/{work_id}")
     def edit_work(work_id: int, change: WorkEdit):
         changes = change.model_dump(exclude_unset=True)
+        expected_revision = changes.pop('expected_revision', None)
         if any(value is None for field, value in changes.items() if field not in RELEASE_DATE_FIELDS):
             raise HTTPException(422, "作品字段不能为 null")
         if "status" in changes and changes["status"] not in {"pending", "published"}:
@@ -440,6 +450,8 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
         with store.connection() as db:
             db.execute('BEGIN IMMEDIATE')
             current = require_work(db, work_id)
+            if expected_revision is not None and expected_revision != work_data_revision(current):
+                raise HTTPException(409, '作品资料已被其他操作修改，请重新读取后再保存')
             if changes:
                 manual_fields = set(json.loads(current["manual_fields"])) | set(changes)
                 if {'es_published', 'patreon_published'} & changes.keys():
@@ -608,7 +620,10 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
             raise HTTPException(403, "无效封面路径")
         return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=3600", "ETag": f'"{cover["fingerprint"]}"'})
 
-    app.state.mcp = create_workbench_mcp(app)
+    app.state.mcp = create_workbench_mcp(app, {
+        'work': WorkEdit, 'tag_create': TagCreate, 'tag_edit': TagEdit,
+        'work_tags': WorkTagsEdit, 'work_links': WorkLinksEdit,
+    })
     app.add_route("/mcp", mcp_http_app(app.state.mcp, mcp_auth), methods=["GET", "POST", "DELETE"])
 
     @app.get("/{frontend_path:path}", include_in_schema=False)

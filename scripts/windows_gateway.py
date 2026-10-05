@@ -193,9 +193,9 @@ class GatewayHandler(BaseHTTPRequestHandler):
             return self.fail(405, "不支持此请求方法")
         if self.command in {"POST", "PATCH", "PUT", "DELETE"}:
             origin = self.headers.get("Origin")
-            # MCP uses POST for read-only RPC; native clients do not send Origin.
-            mcp_read = self.command == "POST" and self.path == "/mcp" and origin is None
-            if not mcp_read and origin != f"http://{host}":
+            # MCP RPC is authenticated by the backend's bearer guard; native clients send no Origin.
+            mcp_rpc = self.command == "POST" and self.path == "/mcp" and origin is None
+            if not mcp_rpc and origin != f"http://{host}":
                 return self.fail(403, "请从工作台页面发起操作")
         if self.headers.get("Transfer-Encoding"):
             return self.fail(400, "不支持分块请求体")

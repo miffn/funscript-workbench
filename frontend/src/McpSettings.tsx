@@ -117,6 +117,6 @@ export function McpSettings() {
     {copied && <p className="mcp-copy-feedback" role="status">{t(copied === 'command' ? '启动命令已复制，请添加到 Agent 的 MCP 设置中。' : copied === 'config' ? 'MCP 配置已复制，其中包含 Token，请妥善保管。' : copied === 'token' ? 'Token 已复制，请妥善保存。' : 'MCP 地址已复制。')}</p>}
     {error && <p className="inline-error" role="alert">{error}</p>}
     <p className="help-text mcp-access-help">{t('地址跟随当前网页，Agent 需能访问此地址；其他电脑请从局域网地址打开工作台后复制。')}</p>
-    <p className="help-text">{t('接入后可读取库存、标签、发布链接、日历和预览信息。当前 MCP 为只读。')}</p>
+    <p className="help-text">{t('接入后可读取库存与预览信息，并维护作品标题、备注、标签、链接、发布状态与日期及日历。Token 同时授权读取和资料维护。原始视频与脚本只读，不执行扫描、匹配、预览生成或网站发帖。')}</p>
   </section>;
 }

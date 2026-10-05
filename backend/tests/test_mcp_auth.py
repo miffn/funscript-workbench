@@ -45,7 +45,8 @@ def test_locked_without_token_then_one_time_secret_and_no_public_leaks(context):
     assert token not in public.text and 'digest' not in public.text and 'token' not in public.json()
     assert token not in client.get('/api/settings').text
     authorized = client.post('/mcp', headers={**ACCEPT, 'Authorization': f'Bearer {token}'}, json=RPC)
-    assert authorized.status_code == 200 and len(authorized.json()['result']['tools']) == 9
+    assert authorized.status_code == 200
+    assert 'workbench_update_work' in {tool['name'] for tool in authorized.json()['result']['tools']}
     assert token not in authorized.text
     # A URL query cannot substitute for the required header (or leak via a generated URL).
     assert client.post('/mcp?token=' + token, headers=ACCEPT, json=RPC).status_code == 401
@@ -59,7 +60,11 @@ def test_authentication_covers_entire_rpc_surface(context, method, header):
     headers = dict(ACCEPT)
     if header is not None:
         headers['Authorization'] = header
-    response = client.post('/mcp', headers=headers, json={**RPC, 'method': method})
+    payload = {**RPC, 'method': method}
+    if method == 'tools/call':
+        payload['params'] = {'name': 'workbench_update_work', 'arguments': {
+            'script_id': 'S025', 'edit': {'expected_revision': '0' * 64, 'notes': 'Unauthorized change'}}}
+    response = client.post('/mcp', headers=headers, json=payload)
     assert response.status_code == 401
 
 

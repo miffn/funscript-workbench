@@ -117,3 +117,13 @@ it('copies the token separately without exposing it in command previews', async 
   expect(writeText).toHaveBeenCalledWith(savedToken);
   expect((screen.getByLabelText('通用启动命令') as HTMLTextAreaElement).value).not.toContain(savedToken);
 });
+it.each([
+  ['zh-CN', '接入后可读取库存与预览信息，并维护作品标题、备注、标签、链接、发布状态与日期及日历。Token 同时授权读取和资料维护。原始视频与脚本只读，不执行扫描、匹配、预览生成或网站发帖。'],
+  ['en', 'Once connected, the agent can read inventory and preview information, and maintain work titles, notes, tags, links, publication statuses and dates, and calendar entries. The token authorizes both reading and data maintenance. Original videos and scripts remain read-only. Scanning, file matching, preview generation and website publishing are unavailable.'],
+] as const)('explains token data-maintenance scope and excluded operations in %s', async (language, copy) => {
+  setLanguage({ language, revision: 2 }); render(<McpSettings />);
+  expect(screen.getByText(copy)).toBeTruthy();
+  expect(screen.queryByText('接入后可读取库存、标签、发布链接、日历和预览信息。当前 MCP 为只读。')).toBeNull();
+  expect(screen.queryByLabelText('Agent 客户端')).toBeNull();
+  await screen.findByRole('button', { name: language === 'en' ? 'Reset token' : '重置 Token' });
+});
