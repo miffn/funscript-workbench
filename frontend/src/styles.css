@@ -94,3 +94,19 @@
 @media(max-width:760px){.nav-item{flex:1 1 auto;min-width:max-content;white-space:nowrap}}
 
 .language-settings{margin-bottom:24px}.language-settings>label{display:block;margin-top:18px;margin-bottom:8px;font-size:13px;font-weight:550}.language-settings>select{min-height:44px;width:min(100%,340px);border:1px solid var(--line);border-radius:8px;padding:10px 12px;background:var(--surface);color:var(--text)}.language-settings>select:focus-visible{outline:3px solid var(--focus);outline-offset:2px}.language-settings p[role="status"]{display:flex;align-items:center;gap:8px}
+.mcp-agent-field, .mcp-command-field, .mcp-url-field { display: grid; gap: 9px; margin-top: 20px; min-width: 0; }
+.mcp-settings label { font-size: 13px; font-weight: 600; color: var(--text); }
+.mcp-settings select, .mcp-settings input, .mcp-settings textarea { min-width: 0; max-width: 100%; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text); padding: 11px 12px; font: inherit; }
+.mcp-settings select { min-height: 44px; width: min(100%, 260px); }
+.mcp-settings textarea { width: 100%; font-family: Consolas, monospace; font-size: 13px; line-height: 1.65; resize: vertical; overflow-wrap: anywhere; }
+.mcp-command-field > .button { justify-self: start; min-height: 44px; }
+.mcp-url-row { display: flex; gap: 10px; min-width: 0; }
+.mcp-url-row input { flex: 1; width: 0; font-family: Consolas, monospace; font-size: 13px; }
+.mcp-url-row .button { min-height: 44px; flex-shrink: 0; }
+.mcp-copy-feedback { color: var(--good); margin: 14px 0 0; font-size: 13px; }
+.mcp-access-help { margin-top: 18px; }
+@media (max-width: 600px) {
+  .mcp-settings textarea { min-height: 7.5em; }
+  .mcp-url-row { flex-wrap: wrap; }
+  .mcp-url-row input { flex-basis: 100%; width: 100%; }
+}

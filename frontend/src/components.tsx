@@ -8,6 +8,7 @@ import type { Notice } from './App';
 import { PreviewSection } from './PreviewSection';
 import { TagChips, WorkTagEditor } from './Tags';
 import { ScanRootsEditor } from './ScanRootsEditor';
+import { McpSettings } from './McpSettings';
 import { ReleaseDates, workDisplayTitle } from './ReleaseDates';
 import { ReleasePostEditor } from './ReleasePosts';
 import { SHOW_ES_POSTS } from './features';
@@ -72,7 +73,7 @@ export function JobsPage({ revision }: { revision: number }) {
 export function SettingsPage({ capabilities, revision }: { capabilities: Capabilities; revision: number }) {
   useI18n();
   const { data, error, loading, retry } = useResource<Settings>('/api/settings', revision);
-  return <>{error && <ResourceError message={error} retry={retry} />}{loading ? <Loading label={t("正在读取运行设置")} /> : data && <div className="settings-layout"><ScanRootsEditor settings={data} /><section className="settings-card"><div className="section-heading"><RefreshCw size={19} /><h2>{t("扫描与库存规则")}</h2></div><dl className="settings-details"><dt>{t("扫描方式")}</dt><dd>{t("手动扫描，点击“立即扫描”更新库存")}</dd><dt>{t("编号来源")}</dt><dd>{t("文件夹编号，保留完整子编号")}</dd><dt>{t("发布状态")}</dt><dd>{t("ES 与 Patreon 分别维护待发布 / 已发布")}</dd><dt>{t("未编号素材")}</dt><dd>{t("不计入完成库存")}</dd><dt>{t("冲突处理")}</dt><dd>{t("保留全部路径并提醒，不自动覆盖")}</dd></dl></section><section className="settings-card"><div className="section-heading"><FolderOpen size={19} /><h2>{t("打开文件夹")}</h2></div><p className="host-ability">{capabilities.can_open_folder ? t("当前访问端支持打开素材主机的文件夹。") : (capabilities.reason ? t(capabilities.reason) : '') || t("不支持打开，仅素材所在主机可用。")}</p><p className="help-text">{t("其他客户端可以查看封面、管理库存与发布状态。")}</p></section></div>}</>;
+  return <>{error && <ResourceError message={error} retry={retry} />}{loading ? <Loading label={t("正在读取运行设置")} /> : data && <div className="settings-layout"><ScanRootsEditor settings={data} /><McpSettings /><section className="settings-card"><div className="section-heading"><RefreshCw size={19} /><h2>{t("扫描与库存规则")}</h2></div><dl className="settings-details"><dt>{t("扫描方式")}</dt><dd>{t("手动扫描，点击“立即扫描”更新库存")}</dd><dt>{t("编号来源")}</dt><dd>{t("文件夹编号，保留完整子编号")}</dd><dt>{t("发布状态")}</dt><dd>{t("ES 与 Patreon 分别维护待发布 / 已发布")}</dd><dt>{t("未编号素材")}</dt><dd>{t("不计入完成库存")}</dd><dt>{t("冲突处理")}</dt><dd>{t("保留全部路径并提醒，不自动覆盖")}</dd></dl></section><section className="settings-card"><div className="section-heading"><FolderOpen size={19} /><h2>{t("打开文件夹")}</h2></div><p className="host-ability">{capabilities.can_open_folder ? t("当前访问端支持打开素材主机的文件夹。") : (capabilities.reason ? t(capabilities.reason) : '') || t("不支持打开，仅素材所在主机可用。")}</p><p className="help-text">{t("其他客户端可以查看封面、管理库存与发布状态。")}</p></section></div>}</>;
 }
 
 export function WorkDetail({ id, capabilities, onClose, onSaved, notify }: { id: number; capabilities: Capabilities; onClose: () => void; onSaved: () => void; notify: (notice: Notice) => void }) {

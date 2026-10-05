@@ -225,7 +225,9 @@ MCP 随 WSL 后端一起启动，复用当前工作台 API 和数据库，无需
 
 客户端必须能访问所填写的工作台地址。此部署采用和网页相同的本机／局域网访问范围，没有独立账号认证；云端 AI 服务无法直接连接本机的 localhost 或局域网地址。
 
-在支持 HTTP MCP 的 AI 客户端中添加上述 URL。本机 Codex 可使用以下命令，连接配置保存在用户的 Codex 配置中：
+网页设置中的“连接 AI Agent”提供 Codex 和 Claude Code 的一键接入命令，以及独立的 MCP 地址复制按钮。命令按当前网页地址生成：其他电脑请通过局域网入口打开工作台后复制，在已安装对应 Agent 客户端的电脑终端执行。复制成功表示命令已进入剪贴板，执行后才会添加 Agent 连接配置。
+
+在支持 HTTP MCP 的其他 AI 客户端中填写 MCP 地址。本机 Codex 也可使用以下命令，连接配置保存在用户的 Codex 配置中：
 
 ```powershell
 codex mcp add funscript-workbench --url http://localhost:8788/mcp
