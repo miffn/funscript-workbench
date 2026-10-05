@@ -1,7 +1,7 @@
-import { translate as t, useI18n, tagName } from './i18n';
-import { useEffect, useRef, useState } from 'react';
-import type { FormEvent, ReactNode } from 'react';
-import { Archive, ArrowRight, Check, CheckCheck, CircleAlert, Clock3, FileText, Film, Folder, FolderOpen, Image, LoaderCircle, RefreshCw, X } from 'lucide-react';
+import { translate as t, useI18n, tagName, getLanguage } from './i18n';
+import { useEffect, useImperativeHandle, useRef, useState } from 'react';
+import type { FormEvent, ReactNode, Ref } from 'react';
+import { Archive, ArrowLeft, ArrowRight, Check, CheckCheck, CircleAlert, Clock3, FileText, Film, Folder, FolderOpen, Image, LoaderCircle, RefreshCw, X } from 'lucide-react';
 import { displayValue, errorMessage, formatDate, formatSize, historyEntries, isActiveJob, isPublished, jobLabel, request, safeLink } from './api';
 import type { Asset, Capabilities, Issue, Job, PublicationPlatform, Settings, Work } from './api';
 import type { Notice } from './App';
@@ -85,8 +85,9 @@ export function SettingsPage({ capabilities, revision, collapsible = false }: { 
   </div>}</>;
 }
 
-export function WorkDetail({ id, capabilities, onClose, onSaved, notify }: { id: number; capabilities: Capabilities; onClose: () => void; onSaved: () => void; notify: (notice: Notice) => void }) {
-  useI18n();
+export interface WorkDetailHandle { requestLeave(next: () => void): void }
+export function WorkDetail({ id, capabilities, onClose, onSaved, notify, presentation = 'dialog', ref }: { id: number; capabilities: Capabilities; onClose: () => void; onSaved: () => void; notify: (notice: Notice) => void; presentation?: 'dialog' | 'page'; ref?: Ref<WorkDetailHandle> }) {
+  const { locale } = useI18n();
   const [work, setWork] = useState<Work | null>(null);
   const [title, setTitle] = useState('');
   const [notes, setNotes] = useState('');
@@ -110,18 +111,50 @@ export function WorkDetail({ id, capabilities, onClose, onSaved, notify }: { id:
   const alive = useRef(true);
   const [retry, setRetry] = useState(0);
   const dialog = useRef<HTMLDialogElement>(null);
+  const heading = useRef<HTMLHeadingElement>(null);
+  const pendingLeave = useRef<(() => void) | null>(null);
   const continueEditing = useRef<HTMLButtonElement>(null);
   const closeButton = useRef<HTMLButtonElement>(null);
   const [confirmClose, setConfirmClose] = useState(false);
   const dirty = !!work && (title !== work.title || notes !== (work.notes || '') || esDate !== (work.es_published_date || '') || patreonDate !== (work.patreon_published_date || ''));
-  const close = () => { if (saving || changingStatus || opening || confirmingProduction) return; if (dirty || matchingDirty) { setConfirmClose(true); return; } onClose(); };
+  useEffect(() => {
+    if (presentation !== 'page' || !(dirty || matchingDirty)) return;
+    const protectDraft = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ''; };
+    window.addEventListener('beforeunload', protectDraft);
+    return () => window.removeEventListener('beforeunload', protectDraft);
+  }, [presentation, dirty, matchingDirty]);
+  useEffect(() => {
+    if (presentation !== 'page') return;
+    const pageTitle = `${!loading && !error && work ? work.script_id : t('作品详情')} · ${t('Funscript 工作台')}`;
+    document.title = pageTitle;
+    return () => {
+      if (document.title === pageTitle) document.title = t('Funscript 工作台', {}, getLanguage().language);
+    };
+  }, [presentation, locale, loading, error, work?.script_id]);
+  const leaveBlocked = saving || changingStatus || opening || confirmingProduction || editingTags || editingPost;
+  const requestLeave = (next: () => void) => {
+    if (leaveBlocked) return;
+    if (dirty || matchingDirty) { pendingLeave.current = next; setConfirmClose(true); return; }
+    pendingLeave.current = null; next();
+  };
+  useImperativeHandle(ref, () => ({ requestLeave }));
+  const close = () => requestLeave(onClose);
+  const discard = () => {
+    if (leaveBlocked) return;
+    const next = pendingLeave.current || onClose;
+    pendingLeave.current = null; setConfirmClose(false); next();
+  };
   useEffect(() => { if (confirmClose) continueEditing.current?.focus(); }, [confirmClose]);
   useEffect(() => {
+    if (presentation === 'page') return;
     dialog.current?.showModal();
     const previous = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     return () => { document.body.style.overflow = previous; };
-  }, []);
+  }, [presentation]);
+  useEffect(() => {
+    if (presentation === 'page' && !loading) heading.current?.focus({ preventScroll: true });
+  }, [presentation, loading, work?.script_id]);
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true); setError('');
@@ -183,9 +216,9 @@ export function WorkDetail({ id, capabilities, onClose, onSaved, notify }: { id:
   const assets = work?.assets || [];
   const history = historyEntries(work?.metadata);
   const assetGroups: [string, Asset[]][] = [[t("视频"), assets.filter(asset => asset.kind === 'video')], [t("脚本"), assets.filter(asset => asset.kind === 'script' || asset.kind === 'funscript')], [t("辅助素材"), assets.filter(asset => !['video', 'script', 'funscript'].includes(asset.kind))]];
-  return <dialog className="detail-dialog" ref={dialog} aria-labelledby="detail-title" onCancel={event => { event.preventDefault(); close(); }} onClick={event => { if (event.target === event.currentTarget) { const rect = event.currentTarget.getBoundingClientRect(); if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) close(); } }}>
-    <div className="detail-header"><div><span className="section-label">{t("作品详情")}</span><h2 id="detail-title">{work?.script_id || t("正在读取")}</h2></div><button className="icon-button" ref={closeButton} onClick={close} aria-label={t("关闭作品详情")} disabled={saving || changingStatus || opening || confirmingProduction} autoFocus><X size={21} /></button></div>
-    {confirmClose && <div className="discard-confirm" role="alert"><strong>{t("有尚未保存的修改")}</strong><p>{t("关闭后将放弃尚未保存的标题、备注、发布日期或脚本对应关系。")}</p><div><button className="button small" ref={continueEditing} onClick={() => { setConfirmClose(false); closeButton.current?.focus(); }}>{t("继续编辑")}</button><button className="button small" onClick={onClose}>{t("放弃更改并关闭")}</button></div></div>}
+  const content = <>
+    <div className="detail-header"><div><span className="section-label">{t("作品详情")}</span>{presentation === 'page' ? <h1 id="detail-title" ref={heading} tabIndex={-1}>{work?.script_id || t("正在读取")}</h1> : <h2 id="detail-title">{work?.script_id || t("正在读取")}</h2>}</div>{presentation === 'page' ? <button className="button detail-back" ref={closeButton} onClick={close} disabled={leaveBlocked}><ArrowLeft size={17} />{t('返回库存')}</button> : <button className="icon-button" ref={closeButton} onClick={close} aria-label={t("关闭作品详情")} disabled={leaveBlocked} autoFocus><X size={21} /></button>}</div>
+    {confirmClose && <div className="discard-confirm" role="alert"><strong>{t("有尚未保存的修改")}</strong><p>{t(presentation === 'page' ? '离开后将放弃尚未保存的标题、备注、发布日期或脚本对应关系。' : "关闭后将放弃尚未保存的标题、备注、发布日期或脚本对应关系。")}</p><div><button className="button small" ref={continueEditing} onClick={() => { pendingLeave.current = null; setConfirmClose(false); closeButton.current?.focus(); }}>{t("继续编辑")}</button><button className="button small" onClick={discard} disabled={leaveBlocked}>{t(presentation === 'page' ? '放弃更改并离开' : "放弃更改并关闭")}</button></div></div>}
     {loading ? <Loading label={t("正在读取作品详情")} /> : error ? <div className="detail-body"><ResourceError message={error} retry={() => setRetry(value => value + 1)} /></div> : work && <>
       <div className="detail-body"><Cover work={work} large /><div className="detail-heading">{workDisplayTitle(work) && <h3>{workDisplayTitle(work)}</h3>}<PublicationBadges work={work} /></div><ReleaseDates work={work} /><div className="detail-summary"><span><Film size={15} />{work.video_count} {t("个视频", { count: work.video_count })}</span><span><FileText size={15} />{work.script_count} {t("个脚本", { count: work.script_count })}</span>{work.axis_type && <span>{tagName({ category: 'axis_type', name: work.axis_type })}</span>}</div>
         {work.issues.length > 0 && <div className="detail-issues">{work.issues.map((issue, index) => <p key={`${issue.type}-${index}`}><CircleAlert size={16} /><span>{t(issue.message)}</span></p>)}</div>}
@@ -223,6 +256,7 @@ export function WorkDetail({ id, capabilities, onClose, onSaved, notify }: { id:
     </>}
     {work && editingTags && <WorkTagEditor work={work} onClose={() => setEditingTags(false)} onSaved={value => { setWork(previous => previous ? { ...previous, tags: value.tags, tags_revision: value.tags_revision } : previous); onSaved(); }} />}
     {SHOW_ES_POSTS && work && editingPost && <ReleasePostEditor workId={id} onClose={() => setEditingPost(false)} />}
-  </dialog>;
+  </>;
+  return presentation === 'page' ? <article className="detail-page" aria-labelledby="detail-title">{content}</article> : <dialog className="detail-dialog" ref={dialog} aria-labelledby="detail-title" onCancel={event => { event.preventDefault(); close(); }} onClick={event => { if (event.target === event.currentTarget) { const rect = event.currentTarget.getBoundingClientRect(); if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) close(); } }}>{content}</dialog>;
 }
 

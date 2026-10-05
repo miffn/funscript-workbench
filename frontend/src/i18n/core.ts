@@ -1,4 +1,7 @@
 export const core: Record<string, string> = {
+  '返回库存': 'Back to inventory',
+  '离开后将放弃尚未保存的标题、备注、发布日期或脚本对应关系。': 'Leaving discards unsaved titles, notes, publication dates or script mappings.',
+  '放弃更改并离开': 'Discard changes and leave',
   '使用通用 MCP 配置连接支持 stdio 的 Agent，无需选择客户端。': 'Connect any agent that supports stdio using the shared MCP configuration.',
   'MCP 访问 Token': 'MCP access token',
   '正在读取 MCP 认证状态…': 'Loading MCP authentication status…',
