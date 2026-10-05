@@ -213,3 +213,45 @@ tar -czf "$backup_file" data
 恢复时先停止服务，将备份的 `data/` 恢复到项目目录，保留数据库和 `host.key`，再启动计划任务。运行中的 SQLite 不应只复制主数据库文件；停机备份整个目录可同时保留 WAL 等配套文件。
 
 项目之外的预览输出目录需另行备份，原素材也需单独备份。备份包含私有运行数据及密钥，应保存在受控位置，不提交到仓库。
+## 9. 连接 AI：只读 MCP
+
+MCP 随 WSL 后端一起启动，复用当前工作台 API 和数据库，无需单独运行工具。协议为 Streamable HTTP，使用 JSON 响应；无需另开端口。
+
+| AI 客户端位置 | MCP 地址 |
+| --- | --- |
+| 素材所在 Windows 主机 | `http://localhost:8788/mcp` |
+| 同一局域网内的其他电脑 | `http://<Windows IPv4>:8787/mcp` |
+| WSL 内 | `http://127.0.0.1:8789/mcp` |
+
+客户端必须能访问所填写的工作台地址。此部署采用和网页相同的本机／局域网访问范围，没有独立账号认证；云端 AI 服务无法直接连接本机的 localhost 或局域网地址。
+
+在支持 HTTP MCP 的 AI 客户端中添加上述 URL。本机 Codex 可使用以下命令，连接配置保存在用户的 Codex 配置中：
+
+```powershell
+codex mcp add funscript-workbench --url http://localhost:8788/mcp
+```
+
+也可在 Codex 的 `config.toml` 中配置：
+
+```toml
+[mcp_servers.funscript-workbench]
+url = "http://localhost:8788/mcp"
+```
+
+其他电脑应使用局域网地址。配置方式参见 [OpenAI 官方 MCP 文档](https://developers.openai.com/codex/mcp)。更新已有部署时先安装新的后端依赖，再重启 WSL 服务及 Windows 网关；后端和网关都需要更新，才能接受不带网页 Origin 的 MCP 客户端请求。
+
+提供以下只读工具：
+
+| 工具 | 读取内容 |
+| --- | --- |
+| `workbench_get_overview` | 服务状态、库存统计、待制作／待发布数量、最近扫描信息 |
+| `workbench_list_works` | 按编号、标题、标签搜索；按分类、标签 ID、异常和未标注情况筛选，支持分页 |
+| `workbench_get_work` | 指定完整编号的标签、链接、ES／Patreon 状态及日期、备注和素材清单 |
+| `workbench_list_tags` | 标签 ID、分类、名称和作者支持链接 |
+| `workbench_get_release_calendar` | 指定 `YYYY-MM` 的计划及实际发布记录 |
+| `workbench_get_preview` | 已生成视频、GIF、热力图的文件 URL 和任务进度 |
+| `workbench_get_jobs` | 指定任务或最近 50 个任务的状态 |
+| `workbench_get_settings` | 扫描目录和工作台姓名、简介；不返回主机密钥或头像二进制 |
+| `workbench_get_post_materials` | 已保存的 ES 模板、贴文输入和生成稿 |
+
+查询使用网页当前维护的数据，不自动扫描、修改资料、生成素材、打开文件夹或发布贴文。`S025` 和 `S025_001` 分别读取；计划日期与实际发布日期分别返回。AI 可以据此回答“有哪些待发布的多轴作品”“读取 S064 的发布资料”“查看 2026-10 的发布安排”等请求。

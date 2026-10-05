@@ -241,3 +241,15 @@ def test_folder_activation_timeout_returns_gateway_failure(gateways, monkeypatch
     monkeypatch.setattr(windows_gateway, 'launch_folder', timeout)
     local, _ = gateways
     assert request(local, 'POST', {'Host': 'localhost:8788', 'Origin': 'http://localhost:8788'}, '{}', '/api/works/1/open-folder')[0] == 502
+
+
+def test_mcp_native_read_rpc_without_origin_is_allowed_only_on_exact_endpoint(gateways):
+    local, remote = gateways
+    for server, host in ((local, 'localhost:8788'), (remote, '192.0.2.6:8787')):
+        headers = {'Host': host, 'Content-Type': 'application/json'}
+        assert request(server, 'POST', headers, '{}', '/mcp')[0] == 200
+        for path in ('/api/scans', '/mcp/other', '/mcp/', '/mcp?write=1'):
+            assert request(server, 'POST', headers, '{}', path)[0] == 403
+        assert request(server, 'PATCH', headers, '{}', '/mcp')[0] == 403
+        headers['Origin'] = 'http://attacker.example'
+        assert request(server, 'POST', headers, '{}', '/mcp')[0] == 403

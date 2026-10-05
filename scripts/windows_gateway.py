@@ -190,7 +190,10 @@ class GatewayHandler(BaseHTTPRequestHandler):
         if self.command not in {"GET", "HEAD", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"}:
             return self.fail(405, "不支持此请求方法")
         if self.command in {"POST", "PATCH", "PUT", "DELETE"}:
-            if self.headers.get("Origin", "") != f"http://{host}":
+            origin = self.headers.get("Origin")
+            # MCP uses POST for read-only RPC; native clients do not send Origin.
+            mcp_read = self.command == "POST" and self.path == "/mcp" and origin is None
+            if not mcp_read and origin != f"http://{host}":
                 return self.fail(403, "请从工作台页面发起操作")
         if self.headers.get("Transfer-Encoding"):
             return self.fail(400, "不支持分块请求体")

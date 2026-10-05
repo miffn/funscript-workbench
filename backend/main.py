@@ -27,6 +27,7 @@ from .language import register_language_routes
 from .es_posts import register_es_post_routes
 from .release_calendar import register_release_calendar_routes
 from .work_directory import current_directory
+from .mcp_server import create_workbench_mcp, mcp_http_app
 
 
 ReleaseDate = Annotated[str | None, BeforeValidator(validate_release_date)]
@@ -139,11 +140,14 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
 
     @asynccontextmanager
     async def lifespan(app):
-        if start_worker:
-            worker.start()
-        yield
-        if start_worker:
-            worker.stop()
+        async with app.state.mcp.session_manager.run():
+            if start_worker:
+                worker.start()
+            try:
+                yield
+            finally:
+                if start_worker:
+                    worker.stop()
 
     app = FastAPI(title="Funscript 工作台", lifespan=lifespan, docs_url=None, redoc_url=None)
     app.state.store = store
@@ -599,6 +603,9 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
         except ValueError:
             raise HTTPException(403, "无效封面路径")
         return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=3600", "ETag": f'"{cover["fingerprint"]}"'})
+
+    app.state.mcp = create_workbench_mcp(app)
+    app.add_route("/mcp", mcp_http_app(app.state.mcp), methods=["GET", "POST", "DELETE"])
 
     @app.get("/{frontend_path:path}", include_in_schema=False)
     def frontend(frontend_path: str):
