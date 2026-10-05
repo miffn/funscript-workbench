@@ -1,7 +1,7 @@
 import { getLanguage, translate as t } from './i18n';
 
 export type Status = 'pending' | 'published';
-export type Filter = 'all' | Status | 'es_published' | 'patreon_published';
+export type Filter = 'all' | Status | 'to_make' | 'es_published' | 'patreon_published';
 export interface Issue { type: string; message: string; script_id?: string; work_id?: number | null; paths?: string[] }
 export interface Directory { id: number; windows_path: string; path: string; available: boolean }
 export interface Asset { id: number; name: string; relative_path: string; kind: string; axis?: string | null; size: number; directory_id: number }
@@ -16,6 +16,7 @@ export interface Work {
   id: number; script_id: string; title: string; status: Status; video_type?: string | null; axis_type?: string | null;
   video_count: number; script_count: number; cover_url: string | null; issues: Issue[]; directories: Directory[];
   updated_at: string; notes?: string; assets?: Asset[]; metadata?: Record<string, unknown>; tags?: Tag[]; tags_revision?: number;
+  production_required?: boolean; production_confirmed_at?: string | null; production_revision?: number;
   links?: WorkLinkValues; links_revision?: number;
   es_published?: boolean; patreon_published?: boolean;
   es_published_date?: string | null; patreon_published_date?: string | null;
@@ -43,7 +44,7 @@ export type PreviewAxis = 'stroke' | 'surge' | 'sway' | 'twist' | 'roll' | 'pitc
 export interface PreviewMatching { work_id: number; video_asset_id: number | null; mode: 'auto' | 'manual'; revision: number; script_asset_ids: Partial<Record<PreviewAxis, number>>; issues: string[]; videos: Asset[]; scripts: Asset[]; job: Job | null; source_changed: boolean }
 export interface PreviewFile { filename: string; kind: 'video' | 'gif' | 'heatmap'; clip_index: number; width: number; height: number; url: string; size: number }
 export interface PreviewState { job: Job | null; files: PreviewFile[]; output_dir: string; windows_path: string; error?: string | null }
-export interface Inventory { items: Work[]; total: number; page: number; page_size: number; stats: { total: number; pending: number; published: number; es_published?: number; patreon_published?: number; issues: number }; last_scan: { at: string; [key: string]: unknown } | null }
+export interface Inventory { items: Work[]; total: number; page: number; page_size: number; stats: { total: number; pending: number; to_make?: number; published: number; es_published?: number; patreon_published?: number; issues: number }; last_scan: { at: string; [key: string]: unknown } | null }
 export interface Capabilities { can_open_folder: boolean; reason: string }
 export interface Settings { roots: (string | Record<string, unknown>)[]; scan_interval_seconds: number; scan_roots_revision?: number; [key: string]: unknown }
 

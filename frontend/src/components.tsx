@@ -93,13 +93,18 @@ export function WorkDetail({ id, capabilities, onClose, onSaved, notify }: { id:
   const [editingTags, setEditingTags] = useState(false);
   const [editingPost, setEditingPost] = useState(false);
   const [matchingDirty, setMatchingDirty] = useState(false);
+  const [confirmingProduction, setConfirmingProduction] = useState(false);
+  const [productionError, setProductionError] = useState('');
+  const [productionTasks, setProductionTasks] = useState({ loading: true, active: false, error: '' });
+  const productionLock = useRef(false);
+  const alive = useRef(true);
   const [retry, setRetry] = useState(0);
   const dialog = useRef<HTMLDialogElement>(null);
   const continueEditing = useRef<HTMLButtonElement>(null);
   const closeButton = useRef<HTMLButtonElement>(null);
   const [confirmClose, setConfirmClose] = useState(false);
   const dirty = !!work && (title !== work.title || notes !== (work.notes || '') || esDate !== (work.es_published_date || '') || patreonDate !== (work.patreon_published_date || ''));
-  const close = () => { if (saving || changingStatus || opening) return; if (dirty || matchingDirty) { setConfirmClose(true); return; } onClose(); };
+  const close = () => { if (saving || changingStatus || opening || confirmingProduction) return; if (dirty || matchingDirty) { setConfirmClose(true); return; } onClose(); };
   useEffect(() => { if (confirmClose) continueEditing.current?.focus(); }, [confirmClose]);
   useEffect(() => {
     dialog.current?.showModal();
@@ -113,8 +118,36 @@ export function WorkDetail({ id, capabilities, onClose, onSaved, notify }: { id:
     request<Work>(`/api/works/${id}`, { signal: controller.signal }).then(result => { setWork(result); setTitle(result.title); setNotes(result.notes || ''); setEsDate(result.es_published_date || ''); setPatreonDate(result.patreon_published_date || ''); setDirectoryId(result.directories.length === 1 ? result.directories[0].id : null); }).catch(error => { if (!controller.signal.aborted) setError(errorMessage(error)); }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
   }, [id, retry]);
+  useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  useEffect(() => {
+    if (!work?.production_required) return;
+    let disposed = false;
+    let controller: AbortController | null = null;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    setProductionTasks({ loading: true, active: false, error: '' });
+    const load = async () => {
+      controller = new AbortController();
+      try {
+        const result = await request<{ items: Job[] }>('/api/jobs', { signal: controller.signal });
+        if (!disposed) setProductionTasks({ loading: false, active: (result.items || []).some(job => ['scan', 'rematch', 'preview'].includes(job.type) && isActiveJob(job)), error: '' });
+      } catch (error) {
+        if (!disposed && !controller.signal.aborted) setProductionTasks({ loading: false, active: false, error: errorMessage(error) });
+      } finally { if (!disposed) timer = setTimeout(() => void load(), 2500); }
+    };
+    void load();
+    return () => { disposed = true; controller?.abort(); if (timer) clearTimeout(timer); };
+  }, [id, work?.production_required]);
+  const confirmProduction = async () => {
+    if (!work?.production_required || productionLock.current || saving || changingStatus || matchingDirty || productionTasks.loading || productionTasks.active || productionTasks.error || !work.script_count || !work.directories.some(directory => directory.id === directoryId && directory.available)) return;
+    productionLock.current = true; setConfirmingProduction(true); setProductionError('');
+    try {
+      const updated = await request<Work>(`/api/works/${id}/production/confirm`, { method: 'POST', body: JSON.stringify({ expected_revision: work.production_revision ?? 0 }) });
+      if (alive.current) { setWork(updated); setDirectoryId(updated.directories.length === 1 ? updated.directories[0].id : null); onSaved(); notify({ kind: 'success', message: t('已确认 {id} 制作完成', { id: updated.script_id }) }); }
+    } catch (error) { if (alive.current) setProductionError(errorMessage(error)); }
+    finally { productionLock.current = false; if (alive.current) setConfirmingProduction(false); }
+  };
   const changeStatus = async (platform: PublicationPlatform) => {
-    if (!work || changingStatus || saving) return;
+    if (!work || changingStatus || saving || productionLock.current) return;
     setChangingStatus(true); setSaveError('');
     try { const updated = await request<Work>(`/api/works/${id}`, { method: 'PATCH', body: JSON.stringify({ [`${platform}_published`]: !isPublished(work, platform) }) }); setWork(updated); onSaved(); notify({ kind: 'success', message: t("{0} 的 {1} 已设为{2}", {"0": work.script_id, "1": platform === 'es' ? 'ES' : 'Patreon', "2": isPublished(updated, platform) ? t("已发布") : t("待发布")}) }); }
     catch (error) { setSaveError(t("发布状态未更新：{0}", {"0": errorMessage(error)})); }
@@ -122,7 +155,7 @@ export function WorkDetail({ id, capabilities, onClose, onSaved, notify }: { id:
   };
   const save = async (event: FormEvent) => {
     event.preventDefault();
-    if (!work || !dirty) return;
+    if (!work || !dirty || productionLock.current || saving || changingStatus) return;
     if (!title.trim()) { setSaveError(t("请填写作品标题。")); return; }
     setSaving(true); setSaveError('');
     try { const updated = await request<Work>(`/api/works/${id}`, { method: 'PATCH', body: JSON.stringify({ title: title.trim(), notes, ...(esDate !== (work.es_published_date || '') ? { es_published_date: esDate || null } : {}), ...(patreonDate !== (work.patreon_published_date || '') ? { patreon_published_date: patreonDate || null } : {}) }) }); setWork(updated); setTitle(updated.title); setNotes(updated.notes || ''); setEsDate(updated.es_published_date || ''); setPatreonDate(updated.patreon_published_date || ''); onSaved(); notify({ kind: 'success', message: t("{0} 的作品信息已保存", {"0": updated.script_id}) }); }
@@ -141,11 +174,21 @@ export function WorkDetail({ id, capabilities, onClose, onSaved, notify }: { id:
   const history = historyEntries(work?.metadata);
   const assetGroups: [string, Asset[]][] = [[t("视频"), assets.filter(asset => asset.kind === 'video')], [t("脚本"), assets.filter(asset => asset.kind === 'script' || asset.kind === 'funscript')], [t("辅助素材"), assets.filter(asset => !['video', 'script', 'funscript'].includes(asset.kind))]];
   return <dialog className="detail-dialog" ref={dialog} aria-labelledby="detail-title" onCancel={event => { event.preventDefault(); close(); }} onClick={event => { if (event.target === event.currentTarget) { const rect = event.currentTarget.getBoundingClientRect(); if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) close(); } }}>
-    <div className="detail-header"><div><span className="section-label">{t("作品详情")}</span><h2 id="detail-title">{work?.script_id || t("正在读取")}</h2></div><button className="icon-button" ref={closeButton} onClick={close} aria-label={t("关闭作品详情")} disabled={saving || changingStatus || opening} autoFocus><X size={21} /></button></div>
+    <div className="detail-header"><div><span className="section-label">{t("作品详情")}</span><h2 id="detail-title">{work?.script_id || t("正在读取")}</h2></div><button className="icon-button" ref={closeButton} onClick={close} aria-label={t("关闭作品详情")} disabled={saving || changingStatus || opening || confirmingProduction} autoFocus><X size={21} /></button></div>
     {confirmClose && <div className="discard-confirm" role="alert"><strong>{t("有尚未保存的修改")}</strong><p>{t("关闭后将放弃尚未保存的标题、备注、发布日期或脚本对应关系。")}</p><div><button className="button small" ref={continueEditing} onClick={() => { setConfirmClose(false); closeButton.current?.focus(); }}>{t("继续编辑")}</button><button className="button small" onClick={onClose}>{t("放弃更改并关闭")}</button></div></div>}
     {loading ? <Loading label={t("正在读取作品详情")} /> : error ? <div className="detail-body"><ResourceError message={error} retry={() => setRetry(value => value + 1)} /></div> : work && <>
       <div className="detail-body"><Cover work={work} large /><div className="detail-heading">{workDisplayTitle(work) && <h3>{workDisplayTitle(work)}</h3>}<PublicationBadges work={work} /></div><ReleaseDates work={work} /><div className="detail-summary"><span><Film size={15} />{work.video_count} {t("个视频", { count: work.video_count })}</span><span><FileText size={15} />{work.script_count} {t("个脚本", { count: work.script_count })}</span>{work.axis_type && <span>{tagName({ category: 'axis_type', name: work.axis_type })}</span>}</div>
         {work.issues.length > 0 && <div className="detail-issues">{work.issues.map((issue, index) => <p key={`${issue.type}-${index}`}><CircleAlert size={16} /><span>{t(issue.message)}</span></p>)}</div>}
+        {work.production_required && <section className="detail-section" aria-labelledby="production-confirmation-title">
+          <div className="section-heading"><CheckCheck size={17} /><h3 id="production-confirmation-title">{t('制作确认')}</h3><span className="badge pending">{t('待确认制作完成')}</span></div>
+          <p className="help-text">{t('发现脚本不会自动确认完成；请检查当前素材后手动确认。')}</p>
+          {!work.script_count ? <p className="help-text">{t('尚无可用脚本，请添加脚本后扫描或重新匹配文件。')}</p> : !currentDir?.available ? <p className="help-text">{t('当前作品目录不可用，请恢复目录后扫描或重新匹配文件。')}</p> : matchingDirty ? <p className="help-text">{t('请先保存或放弃尚未保存的脚本对应关系。')}</p> : productionTasks.active ? <p className="help-text">{t('后台任务正在运行，请等待扫描、匹配或预览完成后确认。')}</p> : null}
+          {productionTasks.error && <p className="inline-error" role="alert">{t('无法检查后台任务：{error}', { error: t(productionTasks.error) })}</p>}
+          {productionError && <p className="inline-error" role="alert">{t('制作完成未确认：{error}', { error: t(productionError) })}</p>}
+          <button type="button" className="button primary" disabled={confirmingProduction || saving || changingStatus || matchingDirty || productionTasks.loading || productionTasks.active || !!productionTasks.error || !work.script_count || !currentDir?.available} onClick={() => void confirmProduction()}>
+            {confirmingProduction || productionTasks.loading ? <LoaderCircle size={17} className="spin" /> : <CheckCheck size={17} />}{confirmingProduction ? t('正在确认制作完成') : t('确认制作完成')}
+          </button>
+        </section>}
         <section className="detail-section"><div className="section-heading"><Folder size={17} /><h3>{t("作品目录")}</h3></div><div className="directory-options">{currentDir && <div className="directory-option selected"><Folder size={17} /><span><code>{currentDir.windows_path || currentDir.path}</code>{!currentDir.available && <small>{t("目录暂不可用")}</small>}</span></div>}</div>{!currentDir && <p className="help-text">{work.issues.some(issue => issue.type === 'duplicate_identifier') ? t("编号存在目录冲突，请处理冲突后重新匹配文件。") : t("尚无可关联的本地目录，请重新匹配文件。")}</p>}
           <button className="button open-folder" onClick={() => void open()} disabled={!capabilities.can_open_folder || !directoryId || !currentDir?.available || opening}>{opening ? <LoaderCircle className="spin" size={17} /> : <FolderOpen size={17} />}{opening ? t("正在发送打开请求") : t("打开文件夹")}</button><p className="host-note">{!capabilities.can_open_folder ? capabilities.reason || t("不支持打开，仅素材所在主机可用") : !currentDir ? t("暂无唯一的关联目录。") : !currentDir.available ? t("当前目录暂不可用，请检查原文件夹。") : t("在素材所在 Windows 主机的资源管理器中打开。")}</p></section>
         <section className="detail-section"><div className="section-heading"><h3>{t("作品标签")}</h3><button className="button small detail-edit-tags" onClick={() => setEditingTags(true)}>{t("编辑标签")}</button></div><TagChips tags={work.tags} durationStatus={work.duration_status} durationError={work.duration_error} /></section>
@@ -153,7 +196,7 @@ export function WorkDetail({ id, capabilities, onClose, onSaved, notify }: { id:
         <PreviewSection work={work} capabilities={capabilities} onDirtyChange={setMatchingDirty} onSourcesChanged={async () => {
           const updated = await request<Work>(`/api/works/${id}`);
           // Refresh discovered source data while retaining locally edited text and tags.
-          setWork(previous => previous ? { ...previous, assets: updated.assets, directories: updated.directories, video_count: updated.video_count, script_count: updated.script_count, cover_url: updated.cover_url, issues: updated.issues, axis_type: updated.axis_type,
+          setWork(previous => previous ? { ...previous, production_required: updated.production_required, production_confirmed_at: updated.production_confirmed_at, production_revision: updated.production_revision, assets: updated.assets, directories: updated.directories, video_count: updated.video_count, script_count: updated.script_count, cover_url: updated.cover_url, issues: updated.issues, axis_type: updated.axis_type,
             duration_seconds: updated.duration_seconds, duration_minutes: updated.duration_minutes,
             duration_status: updated.duration_status, duration_error: updated.duration_error,
             duration_last_known_seconds: updated.duration_last_known_seconds, duration_last_known_minutes: updated.duration_last_known_minutes,
@@ -166,7 +209,7 @@ export function WorkDetail({ id, capabilities, onClose, onSaved, notify }: { id:
         {tab === 'assets' ? <section id="assets-panel" role="tabpanel" aria-labelledby="assets-tab" className="detail-section assets-panel">{!assets.length && <p className="help-text">{t("该编号目录尚未发现关联素材。")}</p>}{assetGroups.filter(([, values]) => values.length).map(([label, values]) => <div className="asset-group" key={label}><h4>{label}<span>{values.length}</span></h4><ul>{values.map(asset => <li key={asset.id}>{label === t("视频") ? <Film size={17} /> : <FileText size={17} />}<div><strong>{asset.name}</strong><small>{asset.relative_path}{work.directories.length > 1 ? t(" · 目录 {0}", {"0": asset.directory_id}) : ''}</small></div><span className="asset-size">{asset.axis && <b>{asset.axis}</b>}{formatSize(asset.size)}</span></li>)}</ul></div>)}</section> : <section id="metadata-panel" role="tabpanel" aria-labelledby="metadata-tab" className="detail-section">{history.length ? <><dl className="metadata-list">{history.map(([label, value]) => { const link = safeLink(value); return <div key={label}><dt>{label}</dt><dd>{link ? <a href={link} target="_blank" rel="noreferrer">{displayValue(value)}</a> : displayValue(value)}</dd></div>; })}</dl><p className="help-text">{t("来自首次导入的历史资料，计划日期不代表实际发布日期。")}</p></> : <p className="help-text">{t("暂无关联的历史资料。")}</p>}</section>}
         <form id="work-edit-form" className="detail-section edit-form" onSubmit={event => void save(event)}><div className="section-heading"><FileText size={17} /><h3>{t("作品信息")}</h3>{dirty && <span className="unsaved-label">{t("未保存")}</span>}</div><label htmlFor="work-title">{t("标题")}</label><input id="work-title" type="text" maxLength={500} value={title} onChange={event => setTitle(event.target.value)} disabled={saving} /><div className="release-date-fields"><div><label htmlFor="work-patreon-date">{t("Patreon 发布日期")}</label><input id="work-patreon-date" type="date" value={patreonDate} onChange={event => setPatreonDate(event.target.value)} disabled={saving || changingStatus} /></div><div><label htmlFor="work-es-date">{t("ES 发布日期")}</label><input id="work-es-date" type="date" value={esDate} onChange={event => setEsDate(event.target.value)} disabled={saving || changingStatus} /></div></div><p className="help-text">{t("保存对应的帖子链接时，未记录的日期默认填入当天（北京时间）；已有日期保留，也可以在这里修改或清空。")}</p><label htmlFor="work-notes">{t("备注")}</label><textarea id="work-notes" rows={4} maxLength={10000} placeholder={t("记录发布安排、素材说明…")} value={notes} onChange={event => setNotes(event.target.value)} disabled={saving} /><p className="help-text">{t("扫描不会覆盖你维护的标题、备注、发布日期和发布状态。")}</p></form>
       </div>
-      <div className="detail-actions">{saveError && <p className="inline-error" role="alert">{t(saveError)}</p>}<div><div className="publication-controls">{(['es', 'patreon'] as const).map(platform => <button key={platform} className="button" disabled={changingStatus || saving} onClick={() => void changeStatus(platform)}>{changingStatus ? <LoaderCircle size={16} className="spin" /> : isPublished(work, platform) ? <Clock3 size={16} /> : <CheckCheck size={16} />}{isPublished(work, platform) ? t("将 {0} 改为待发布", {"0": platform === 'es' ? 'ES' : 'Patreon'}) : t("标记 {0} 已发布", {"0": platform === 'es' ? 'ES' : 'Patreon'})}</button>)}</div><button className="button primary" type="submit" form="work-edit-form" disabled={!dirty || saving || changingStatus}>{saving ? <LoaderCircle className="spin" size={16} /> : <Check size={16} />}{saving ? t("正在保存") : t("保存信息")}</button></div></div>
+      <div className="detail-actions">{saveError && <p className="inline-error" role="alert">{t(saveError)}</p>}<div><div className="publication-controls">{(['es', 'patreon'] as const).map(platform => <button key={platform} className="button" disabled={changingStatus || saving || confirmingProduction} onClick={() => void changeStatus(platform)}>{changingStatus ? <LoaderCircle size={16} className="spin" /> : isPublished(work, platform) ? <Clock3 size={16} /> : <CheckCheck size={16} />}{isPublished(work, platform) ? t("将 {0} 改为待发布", {"0": platform === 'es' ? 'ES' : 'Patreon'}) : t("标记 {0} 已发布", {"0": platform === 'es' ? 'ES' : 'Patreon'})}</button>)}</div><button className="button primary" type="submit" form="work-edit-form" disabled={!dirty || saving || changingStatus || confirmingProduction}>{saving ? <LoaderCircle className="spin" size={16} /> : <Check size={16} />}{saving ? t("正在保存") : t("保存信息")}</button></div></div>
     </>}
     {work && editingTags && <WorkTagEditor work={work} onClose={() => setEditingTags(false)} onSaved={value => { setWork(previous => previous ? { ...previous, tags: value.tags, tags_revision: value.tags_revision } : previous); onSaved(); }} />}
     {SHOW_ES_POSTS && work && editingPost && <ReleasePostEditor workId={id} onClose={() => setEditingPost(false)} />}

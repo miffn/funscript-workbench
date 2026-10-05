@@ -19,6 +19,8 @@ CREATE TABLE IF NOT EXISTS works (
  es_published INTEGER NOT NULL DEFAULT 0 CHECK(es_published IN (0,1)),
  patreon_published INTEGER NOT NULL DEFAULT 0 CHECK(patreon_published IN (0,1)),
  es_published_date TEXT, patreon_published_date TEXT,
+ production_required INTEGER NOT NULL DEFAULT 0 CHECK(production_required IN (0,1)),
+ production_confirmed_at TEXT, production_revision INTEGER NOT NULL DEFAULT 0,
  notes TEXT NOT NULL DEFAULT '', metadata TEXT NOT NULL DEFAULT '{}', manual_fields TEXT NOT NULL DEFAULT '[]',
  created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
@@ -171,6 +173,17 @@ class Store:
                         db.execute('UPDATE works SET es_published=1 WHERE id=?', (work['id'],))
             if not {'es_published', 'patreon_published'} <= work_columns:
                 db.execute("UPDATE works SET status=CASE WHEN es_published=1 AND patreon_published=1 THEN 'published' ELSE 'pending' END")
+            for field, definition in (
+                ('production_required', 'INTEGER NOT NULL DEFAULT 0 CHECK(production_required IN (0,1))'),
+                ('production_confirmed_at', 'TEXT'), ('production_revision', 'INTEGER NOT NULL DEFAULT 0'),
+            ):
+                if field not in work_columns:
+                    db.execute(f'ALTER TABLE works ADD COLUMN {field} {definition}')
+            if not db.execute("SELECT 1 FROM settings WHERE key='production_confirmation_initialized'").fetchone():
+                from .production import require_production_confirmation
+                for work in db.execute('SELECT id FROM works').fetchall():
+                    require_production_confirmation(db, work['id'])
+                db.execute("INSERT INTO settings(key,value) VALUES('production_confirmation_initialized','true')")
 
     @contextmanager
     def connection(self):

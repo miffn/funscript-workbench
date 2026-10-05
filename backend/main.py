@@ -11,7 +11,7 @@ from typing import Annotated, Literal
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, model_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, StrictInt, model_validator
 
 from .config import Config
 from .jobs import JobWorker
@@ -47,6 +47,11 @@ class WorkEdit(BaseModel):
 class OpenFolder(BaseModel):
     model_config = ConfigDict(extra="forbid")
     directory_id: int | None = None
+
+
+class ProductionConfirmation(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    expected_revision: StrictInt = Field(ge=0)
 
 
 class ScanOptions(BaseModel):
@@ -171,6 +176,7 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
         record = dict(work)
         record['es_published'] = bool(record['es_published'])
         record['patreon_published'] = bool(record['patreon_published'])
+        record['production_required'] = bool(record['production_required'])
         record['status'] = 'published' if record['es_published'] and record['patreon_published'] else 'pending'
         metadata = enrich_metadata(json.loads(record["metadata"]))
         record.pop("manual_fields", None)
@@ -273,6 +279,21 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
     def health():
         return {"status": "ok", "service": "script-workbench"}
 
+    def script_groups(db):
+        # Use the same current directory and cached-source rules as work details.
+        registered = {str(root.path) for root in scan_roots.roots(db)}
+        unavailable = set((last_scan(db) or {}).get('unavailable_roots', []))
+        script_directories = {row[0] for row in db.execute("SELECT DISTINCT directory_id FROM assets WHERE kind='script'")}
+        required = {row[0] for row in db.execute('SELECT id FROM works WHERE production_required=1')}
+        ready, to_make = set(), set()
+        for row in db.execute('SELECT DISTINCT work_id FROM directories').fetchall():
+            directory = current_directory(db, row[0])
+            if directory is None:
+                continue
+            if directory['available'] or directory['root_path'] in unavailable or directory['root_path'] not in registered:
+                (ready if directory['id'] in script_directories and row[0] not in required else to_make).add(row[0])
+        return ready, to_make
+
     @app.get("/api/works")
     def works(q: str = Query(default="", max_length=300), status: str = "all", issues_only: bool = False,
               tag_id: int | None = Query(default=None, gt=0), untagged_only: str = Query(default="false", pattern="^(true|false)$"),
@@ -280,15 +301,15 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
         status_filters = {'pending': '(es_published=0 OR patreon_published=0)',
                           'published': '(es_published=1 AND patreon_published=1)',
                           'es_published': 'es_published=1', 'patreon_published': 'patreon_published=1'}
-        if status != 'all' and status not in status_filters:
-            raise HTTPException(422, "发布状态应为 pending、published、es_published、patreon_published 或 all")
+        if status != 'all' and status != 'to_make' and status not in status_filters:
+            raise HTTPException(422, "库存分类应为 to_make、pending、published、es_published、patreon_published 或 all")
         clauses, values = [], []
         if q.strip():
             # Literal search: % and _ in user text are not wildcard operators.
             term = q.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
             clauses.append("(script_id LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\' OR EXISTS(SELECT 1 FROM work_tags wt JOIN tags t ON t.id=wt.tag_id WHERE wt.work_id=works.id AND t.name_key LIKE ? ESCAPE '\\'))")
             values.extend([f"%{term}%", f"%{term}%", f"%{term.casefold()}%"])
-        if status != "all":
+        if status in status_filters:
             clauses.append(status_filters[status])
         if issues_only:
             clauses.append("EXISTS(SELECT 1 FROM issues WHERE issues.work_id=works.id)")
@@ -299,14 +320,20 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
             if tag_id is not None:
                 raise HTTPException(422, "按标签筛选不能同时只看无标签库存")
             clauses.append("NOT EXISTS(SELECT 1 FROM work_tags wt JOIN tags t ON t.id=wt.tag_id WHERE wt.work_id=works.id AND t.category!='duration' AND (t.category!='axis_type' OR wt.source!='scan'))")
-        where = " WHERE " + " AND ".join(clauses) if clauses else ""
         with store.connection() as db:
             if tag_id is not None and not db.execute("SELECT 1 FROM tags WHERE id=?", (tag_id,)).fetchone():
                 raise HTTPException(404, "筛选标签不存在")
+            ready_ids, to_make_ids = script_groups(db)
+            if status in {'pending', 'to_make'}:
+                ids = sorted(ready_ids if status == 'pending' else to_make_ids)
+                clauses.append(f"id IN ({','.join('?' for _ in ids)})" if ids else '0')
+                values.extend(ids)
+            where = " WHERE " + " AND ".join(clauses) if clauses else ""
             total = db.execute("SELECT count(*) FROM works" + where, values).fetchone()[0]
             rows = db.execute("SELECT * FROM works" + where + " ORDER BY script_id DESC LIMIT ? OFFSET ?", [*values, page_size, (page - 1) * page_size]).fetchall()
             stats = {"total": db.execute("SELECT count(*) FROM works").fetchone()[0],
-                     "pending": db.execute("SELECT count(*) FROM works WHERE es_published=0 OR patreon_published=0").fetchone()[0],
+                     "pending": sum(row['id'] in ready_ids for row in db.execute("SELECT id FROM works WHERE es_published=0 OR patreon_published=0")),
+                     "to_make": len(to_make_ids),
                      "published": db.execute("SELECT count(*) FROM works WHERE es_published=1 AND patreon_published=1").fetchone()[0],
                      "es_published": db.execute("SELECT count(*) FROM works WHERE es_published=1").fetchone()[0],
                      "patreon_published": db.execute("SELECT count(*) FROM works WHERE patreon_published=1").fetchone()[0],
@@ -317,6 +344,33 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
     @app.get("/api/works/{work_id}")
     def work_detail(work_id: int):
         with store.connection() as db:
+            return details(db, require_work(db, work_id), include_assets=True)
+
+    @app.post('/api/works/{work_id}/production/confirm')
+    def confirm_production(work_id: int, options: ProductionConfirmation):
+        with store.connection() as db:
+            db.execute('BEGIN IMMEDIATE')
+            work = require_work(db, work_id)
+            if work['production_revision'] != options.expected_revision:
+                raise HTTPException(409, '制作确认状态已变化，请刷新作品后重试')
+            if db.execute("SELECT 1 FROM jobs WHERE status IN ('queued','running') AND (type='scan' OR json_extract(inputs,'$.work_id')=?)", (work_id,)).fetchone():
+                raise HTTPException(409, '素材任务正在运行，请等待完成后确认制作')
+            directory = current_directory(db, work_id)
+            if directory is None:
+                raise HTTPException(409, '尚无唯一的作品目录，请处理冲突后重新匹配文件')
+            scripts = db.execute("SELECT a.*,d.path,d.root_path,d.available FROM assets a JOIN directories d ON d.id=a.directory_id WHERE d.id=? AND a.kind='script'", (directory['id'],)).fetchall()
+            available = False
+            for script in scripts:
+                try:
+                    worker.previews.valid_source(dict(script))
+                    available = True
+                    break
+                except PreviewError:
+                    continue
+            if not available:
+                raise HTTPException(422, '没有可用脚本，添加脚本后请先扫描或重新匹配文件')
+            if work['production_required']:
+                db.execute('UPDATE works SET production_required=0,production_confirmed_at=?,production_revision=production_revision+1 WHERE id=?', (now(), work_id))
             return details(db, require_work(db, work_id), include_assets=True)
 
     @app.get("/api/tags")

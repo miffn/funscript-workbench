@@ -17,7 +17,9 @@ def inventory(tmp_path):
     root = tmp_path / 'inventory'
     root.mkdir()
     for number in range(1, 5):
-        (root / f'S{number:03d}').mkdir()
+        folder = root / f'S{number:03d}'
+        folder.mkdir()
+        (folder / 'main.funscript').write_text('{"actions":[]}')
     config = Config(data_dir=tmp_path / 'data', roots=(Root(root, r'E:\material', 'Inventory'),),
                     preview_output_root=tmp_path / 'previews')
     app = create_app(config, start_worker=False)
@@ -56,9 +58,10 @@ def test_independent_platforms_four_combinations_and_filters(inventory):
 def test_platform_flags_require_real_booleans(inventory, field, value):
     _, _, _, client = inventory
     work = client.get('/api/works').json()['items'][0]
+    before = client.get(f'/api/works/{work["id"]}').json()
     response = client.patch(f'/api/works/{work["id"]}', json={field: value, 'notes': 'must remain atomic'})
     assert response.status_code == 422
-    assert client.get(f'/api/works/{work["id"]}').json() == work | {'assets': []}
+    assert client.get(f'/api/works/{work["id"]}').json() == before
 
 
 def test_legacy_status_mapping_and_conflicting_payload_is_atomic(inventory):

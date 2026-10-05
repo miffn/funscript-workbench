@@ -8,6 +8,7 @@ import re
 from .config import Config, Root, normalize_id, parse_folder
 from .store import Store, now
 from .tags import sync_axis_tag
+from .production import require_production_confirmation
 
 VIDEO_EXTENSIONS = {".mp4", ".mkv", ".mov", ".webm", ".avi", ".m4v", ".wmv", ".ts", ".mpg", ".mpeg"}
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"}
@@ -276,6 +277,7 @@ class Scanner:
                 if work["id"] not in affected:
                     continue
                 sync_axis_tag(db, work["id"])
+                require_production_confirmation(db, work['id'])
                 directories = db.execute("SELECT * FROM directories WHERE work_id=?", (work["id"],)).fetchall()
                 active = [directory for directory in directories if directory["available"]]
                 verified_active = [directory for directory in active if directory["root_path"] in reachable]
