@@ -50,6 +50,13 @@ export default function App() {
   const [profileError, setProfileError] = useState('');
   const [profileRetry, setProfileRetry] = useState(0);
   useEffect(() => {
+    const icon = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
+    if (!icon) return;
+    const avatarType = profile.avatar?.match(/^data:(image\/(?:png|jpeg|webp));base64,/);
+    icon.href = avatarType ? profile.avatar! : '/favicon.svg';
+    icon.type = avatarType?.[1] || 'image/svg+xml';
+  }, [profile.avatar]);
+  useEffect(() => {
     const controller = new AbortController(); setProfileLoading(true);
     request<ProfileData>('/api/profile', { signal: controller.signal }).then(value => {
       if (controller.signal.aborted) return;
