@@ -46,9 +46,9 @@ def main() -> None:
                     filename = button['localAsset'].replace('\\', '/').rsplit('/', 1)[-1]
                     candidate = config.frontend_dist.parent / 'public' / 'es-theme' / filename
                     button['localAsset'] = '/es-theme/' + filename if candidate.is_file() else ''
-            imported.setdefault('recentPinnedIds', ['S046'])
+            imported.setdefault('recentPinnedIds', [])
             saved = service.save_template(TemplateEdit(
-                name=source.get('name', 'ES · Liora Garden') if exported else 'ES · Liora Garden',
+                name=source.get('name', 'ES 发布模板') if exported else 'ES 发布模板',
                 body=source.get('body', DEFAULT_BODY) if exported else DEFAULT_BODY,
                 config=imported, expected_revision=current['revision']))
             summary['template'] = {'name': saved['name'], 'revision': saved['revision']}

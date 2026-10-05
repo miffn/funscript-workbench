@@ -70,6 +70,15 @@ def generate(client, work_id):
 
 def test_paid_ready_preserves_upload_markdown_and_layout(posts):
     client, store, config, service = posts
+    template = client.get('/api/es-template').json()
+    assert template['config']['recentPinnedIds'] == [] and template['config']['promoButtons'] == []
+    assert template['config']['brandingHeaderMarkdown'] == ''
+    template['config'].update(brandingHeaderMarkdown='Example header', promoButtons=[
+        {'id': 'example-video', 'group': 'action', 'label': 'Video', 'linkSource': 'videoLink'},
+        {'id': 'example-post', 'group': 'action-paid', 'label': 'View Patreon Release', 'linkSource': 'patreonLink'},
+        {'id': 'example-author', 'group': 'bottom', 'label': 'Support', 'linkSource': 'supportCreatorLink'},
+    ])
+    client.put('/api/es-template', json={key: template[key] for key in ('name', 'body', 'config')} | {'expected_revision': template['revision']}).raise_for_status()
     work_id = work(posts, script_id='S025_001', title='[Multi-axis] Exact Title', support='url')
     preview = '![First GIF|192x108](upload://first.gif)\n\n[clip.webm](upload://clip.webm)'
     save(client, work_id, preview_markdown=preview, intro_markdown='Intro for this release',
@@ -81,8 +90,8 @@ def test_paid_ready_preserves_upload_markdown_and_layout(posts):
     assert '[center]\n' + preview not in output['body']
     assert 'NEVER_PUBLISH' not in json.dumps(output)
     assert output['title'] not in output['body']
-    assert output['body'].startswith('[center][/center]')
-    assert output['body'].index('Intro for this release') < output['body'].index(preview) < output['body'].index('Choose Your Path')
+    assert output['body'].startswith('Example header')
+    assert output['body'].index('Intro for this release') < output['body'].index(preview) < output['body'].index('Links')
     assert 'width="50%"' in output['body'] and '<summary><strong>📊 Script Heatmaps' in output['body']
     assert 'View Patreon Release' in output['body'] and 'https://creator.example/support' in output['body']
     assert 'Script File' not in output['body'] and 'Download Script' not in output['body']
@@ -229,19 +238,22 @@ def test_persistence_and_import_history_respects_workbench_covers(posts):
 
 def test_recent_four_actual_dates_pin_and_current_exclusion(posts):
     client, store, _, service = posts
+    template = client.get('/api/es-template').json()
+    template['config']['recentPinnedIds'] = ['S901']
+    client.put('/api/es-template', json={key: template[key] for key in ('name', 'body', 'config')} | {'expected_revision': template['revision']}).raise_for_status()
     current = work(posts, script_id='S080')
-    candidates = [work(posts, script_id=script_id) for script_id in ('S046', 'S071', 'S072', 'S073', 'S074', 'S075')]
+    candidates = [work(posts, script_id=script_id) for script_id in ('S901', 'S071', 'S072', 'S073', 'S074', 'S075')]
     history = {'previews': {script_id: {'uploadUrl': f'upload://{script_id}.gif', 'markdown': ''}
-                           for script_id in ('S046', 'S071', 'S072', 'S073', 'S074', 'S075', 'S080')}}
+                           for script_id in ('S901', 'S071', 'S072', 'S073', 'S074', 'S075', 'S080')}}
     import_preview_history(store, history)
     for work_id, day in zip(candidates, ('2025-01-01', '2026-09-20', '2026-09-21', '2026-09-22', '2026-09-23', '2026-09-24')):
         WorkLinks(store).update(work_id, {'es': f'https://forum.example/t/{work_id}'}, 1, {'es_published_date': day})
     save(client, current, preview_markdown='![gif](upload://current.gif)')
     result = generate(client, current).json()['output']
     recent = result['body'].split('Recent Releases')[1]
-    assert all(script_id in recent for script_id in ('S046', 'S073', 'S074', 'S075'))
+    assert all(script_id in recent for script_id in ('S901', 'S073', 'S074', 'S075'))
     assert all(script_id not in recent for script_id in ('S071', 'S072', 'S080'))
-    assert recent.index('S075') < recent.index('S074') < recent.index('S073') < recent.index('S046')
+    assert recent.index('S075') < recent.index('S074') < recent.index('S073') < recent.index('S901')
     with store.connection() as db:
         db.execute('UPDATE works SET es_published=0 WHERE id=?', (candidates[-1],))
     assert 'S075' not in generate(client, current).json()['output']['body'].split('Recent Releases')[1]
@@ -304,7 +316,7 @@ def test_missing_media_section_never_ready_and_wrong_template_types(posts):
     template = client.get('/api/es-template').json()
     payload = {key: template[key] for key in ('name', 'body', 'config')}
     payload['expected_revision'] = template['revision']
-    bad = {**payload, 'config': {**payload['config'], 'recentPinnedIds': ['S046'] * 5}}
+    bad = {**payload, 'config': {**payload['config'], 'recentPinnedIds': ['S901'] * 5}}
     assert client.put('/api/es-template', json=bad).status_code == 422
     bad = {**payload, 'config': {**payload['config'], 'promoButtons': [{'id': 'evil', 'group': 'bottom', 'linkUrl': 'javascript:alert(1)'}]}}
     assert client.put('/api/es-template', json=bad).status_code == 422

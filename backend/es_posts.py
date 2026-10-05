@@ -25,17 +25,10 @@ TOKENS = {'header', 'intro', 'metadata', 'preview', 'heatmaps', 'attachments', '
 DEFAULT_BODY = '\n\n'.join('{{' + token + '}}' for token in
                           ('header', 'intro', 'metadata', 'preview', 'heatmaps', 'attachments', 'navigation', 'motion', 'recent', 'footer'))
 DEFAULT_CONFIG = {
-    'version': 4, 'theme': 'garden-journal', 'brandingHeaderMarkdown': '[center][/center]',
+    'version': 4, 'theme': 'default', 'brandingHeaderMarkdown': '',
     'brandingFooterMarkdown': '', 'showFeaturedHeading': False, 'showTitleInBody': False,
-    'showPicks': False, 'tierNoticeMarkdown': '', 'footerText': '', 'recentPinnedIds': ['S046'],
-    'promoButtons': [
-        {'id': 'video-link', 'group': 'action', 'label': 'Video Link', 'linkSource': 'videoLink', 'imageUrl': '', 'width': '300'},
-        {'id': 'paid-script', 'group': 'action-paid', 'label': 'View Patreon Release', 'linkSource': 'patreonLink', 'imageUrl': '', 'width': '300'},
-        {'id': 'all-script-videos', 'group': 'bottom', 'label': 'Video Archive', 'linkUrl': '', 'imageUrl': '', 'width': '300'},
-        {'id': 'support-video-creator', 'group': 'bottom', 'label': 'Support Video Creator', 'linkSource': 'supportCreatorLink', 'imageUrl': '', 'width': '300'},
-        {'id': 'browse-scripts', 'group': 'bottom', 'label': 'View Portfolio', 'linkUrl': '', 'imageUrl': '', 'width': '300'},
-        {'id': 'support-patreon', 'group': 'bottom', 'label': 'Support on Patreon', 'linkUrl': '', 'imageUrl': '', 'width': '300'},
-    ],
+    'showPicks': False, 'tierNoticeMarkdown': '', 'footerText': '', 'recentPinnedIds': [],
+    'promoButtons': [],
 }
 UPLOAD_RE = re.compile(r'upload://[^\s)\"\'<>]+', re.I)
 IMAGE_RE = re.compile(r'upload://[^\s)\"\'<>]+\.(?:gif|jpe?g|png|webp)(?:\?[^\s)\"\'<>]*)?', re.I)
@@ -377,7 +370,7 @@ class ESPosts:
         if not cells:
             return ''
         rows = ['<tr>\n' + '\n'.join(cells[index:index+2]) + '\n</tr>' for index in range(0, len(cells), 2)]
-        return '<h1 align="center">🌿 Recent Releases 🌿</h1>\n\n<table>\n' + '\n'.join(rows) + '\n</table>'
+        return '<h1 align="center">Recent Releases</h1>\n\n<table>\n' + '\n'.join(rows) + '\n</table>'
 
     def build(self, db, work_id, inputs, sources, duration, duration_issue):
         work, tags, links, _ = self.records(db, work_id)
@@ -471,9 +464,9 @@ class ESPosts:
                 if len(cells) == 1:
                     cells[0] = cells[0].replace('width="50%"', 'colspan="2"', 1)
                 rows.append('<tr>\n' + '\n'.join(cells) + '\n</tr>')
-            navigation = '<h2 align="center">🌼 Choose Your Path 🌼</h2>\n\n<table width="100%">\n' + '\n'.join(rows) + '\n</table>'
+            navigation = '<h2 align="center">Links</h2>\n\n<table width="100%">\n' + '\n'.join(rows) + '\n</table>'
         metadata = ' · '.join(html.escape(value) for value in (values['video_type'], axis, length, values['tier']) if value)
-        motion = '<details>\n<summary><strong>🌿 View Motion &amp; Axis Details</strong></summary>\n\n<p align="center"><code>' + html.escape(axis) + '</code></p>\n\n<p align="center"><small>' + html.escape(values['video_type'] + ' · ' + length) + '</small></p>\n\n</details>'
+        motion = '<details>\n<summary><strong>Motion &amp; Axis Details</strong></summary>\n\n<p align="center"><code>' + html.escape(axis) + '</code></p>\n\n<p align="center"><small>' + html.escape(values['video_type'] + ' · ' + length) + '</small></p>\n\n</details>'
         parts = {'header': config['brandingHeaderMarkdown'], 'intro': inputs['intro_markdown'],
                  'metadata': '<p align="center"><code>' + metadata + '</code></p>', 'preview': preview,
                  'heatmaps': heatmaps, 'attachments': attachments, 'navigation': navigation, 'motion': motion,

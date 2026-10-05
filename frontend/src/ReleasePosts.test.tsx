@@ -7,7 +7,7 @@ const inputs = { release_title: '', intro_markdown: '', cover_markdown: '', prev
 const output = { title: '【Free】【S999】【Single-axis】 Test release', body: '[center][/center]\n\n[Preview will be inserted here]', status: 'draft', missing: ['请上传预览'], warnings: [], generated_at: '2026-10-02T00:00:00Z', template_revision: 0, stale: false };
 const state = { work_id: 999, revision: 3, inputs, output, sources: { scripts: [{ id: 15, name: 'sample.funscript', relative_path: 'sample.funscript', kind: 'script', size: 30, directory_id: 1, download_url: '/api/works/999/es-post/scripts/15' }], videos: [], previews: [{ filename: 'preview.gif', kind: 'gif', size: 50, clip_index: 1, width: 192, height: 108, url: '/api/works/999/preview/files/preview.gif' }], author_support: { name: 'Author', status: 'unknown', url: null } } };
 const work = { id: 999, script_id: 'S999', title: 'Test release', notes: 'private inventory note', tags: [{ category: 'release_type', name: 'Free Sample' }] };
-const template = { name: 'Local template', body: '{{header}}\n{{preview}}\n{{recent}}\n{{footer}}', config: { brandingHeaderMarkdown: '[center][/center]', brandingFooterMarkdown: '', recentPinnedIds: ['S046'], promoButtons: [{ id: 'video-link', label: 'Video Link', imageUrl: '', linkSource: 'videoLink', group: 'action', width: '300' }], retainedOption: 'keep' }, revision: 2 };
+const template = { name: 'Local template', body: '{{header}}\n{{preview}}\n{{recent}}\n{{footer}}', config: { brandingHeaderMarkdown: '[center][/center]', brandingFooterMarkdown: '', recentPinnedIds: ['S901'], promoButtons: [{ id: 'video-link', label: 'Video Link', imageUrl: '', linkSource: 'videoLink', group: 'action', width: '300' }], retainedOption: 'keep' }, revision: 2 };
 const response = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json' } });
 let fetchMock: ReturnType<typeof vi.fn>;
 beforeEach(() => {
@@ -163,11 +163,11 @@ describe('database-backed ES template editing', () => {
     fireEvent.change(screen.getByLabelText('模板名称'), { target: { value: 'My template' } });
     fireEvent.click(screen.getByText('主题与导航设置'));
     fireEvent.change(screen.getByLabelText(/品牌页脚 Markdown/), { target: { value: '[center]footer[/center]' } });
-    fireEvent.change(screen.getByLabelText(/近期作品固定编号/), { target: { value: 'S046, S999' } });
+    fireEvent.change(screen.getByLabelText(/近期作品固定编号/), { target: { value: 'S901, S999' } });
     fireEvent.click(screen.getByRole('button', { name: '保存 ES 模板' }));
     await screen.findByRole('status');
     const saved = fetchMock.mock.calls.find(call => call[1]?.method === 'PUT');
-    expect(JSON.parse(saved?.[1]?.body as string)).toMatchObject({ name: 'My template', expected_revision: 2, config: { retainedOption: 'keep', recentPinnedIds: ['S046', 'S999'], brandingFooterMarkdown: '[center]footer[/center]' } });
+    expect(JSON.parse(saved?.[1]?.body as string)).toMatchObject({ name: 'My template', expected_revision: 2, config: { retainedOption: 'keep', recentPinnedIds: ['S901', 'S999'], brandingFooterMarkdown: '[center]footer[/center]' } });
   });
 
   it('retains malformed advanced JSON and never submits it', async () => {
