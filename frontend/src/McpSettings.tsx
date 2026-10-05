@@ -3,11 +3,12 @@ import { Bot, Check, Copy, Eye, EyeOff, KeyRound, LoaderCircle } from 'lucide-re
 import { ApiError, request } from './api';
 import { copyText } from './clipboard';
 import { translate as t, useI18n } from './i18n';
+import { SettingsSection } from './SettingsSection';
 
 type AuthState = { enabled: boolean; can_manage: boolean; revision: number; updated_at: string | null };
 type CopyTarget = 'command' | 'config' | 'url' | 'token';
 
-export function McpSettings() {
+export function McpSettings({ collapsible = false }: { collapsible?: boolean } = {}) {
   useI18n();
   const [auth, setAuth] = useState<AuthState | null>(null);
   const [loading, setLoading] = useState(true);
@@ -69,8 +70,7 @@ export function McpSettings() {
     finally { setCopying(false); }
   }
 
-  return <section className="settings-card mcp-settings" aria-labelledby="mcp-settings-title">
-    <div className="section-heading"><Bot size={20} aria-hidden="true" /><h2 id="mcp-settings-title">{t('连接 AI Agent')}</h2></div>
+  return <SettingsSection className="mcp-settings" headingId="mcp-settings-title" title={t('连接 AI Agent')} icon={<Bot size={20} aria-hidden="true" />} collapsible={collapsible}>
     <p className="help-text">{t('使用通用 MCP 配置连接支持 stdio 的 Agent，无需选择客户端。')}</p>
     <div className="mcp-auth-panel">
       <h3><KeyRound size={17} aria-hidden="true" />{t('MCP 访问 Token')}</h3>
@@ -118,5 +118,5 @@ export function McpSettings() {
     {error && <p className="inline-error" role="alert">{error}</p>}
     <p className="help-text mcp-access-help">{t('地址跟随当前网页，Agent 需能访问此地址；其他电脑请从局域网地址打开工作台后复制。')}</p>
     <p className="help-text">{t('接入后可读取库存与预览信息，并维护作品标题、备注、标签、链接、发布状态与日期及日历。Token 同时授权读取和资料维护。原始视频与脚本只读，不执行扫描、匹配、预览生成或网站发帖。')}</p>
-  </section>;
+  </SettingsSection>;
 }

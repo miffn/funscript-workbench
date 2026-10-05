@@ -1,3 +1,4 @@
+import { SettingsSection } from './SettingsSection';
 import { useI18n, translate } from './i18n';
 import { useEffect, useRef, useState } from 'react';
 import { Check, CircleAlert, Folder, LoaderCircle, Plus, RefreshCw, Trash2 } from 'lucide-react';
@@ -15,7 +16,7 @@ function rootOptions(settings: Settings): RootOption[] {
 const catalog = (roots: RootOption[]) => roots.map(({ path, label, enabled }) => ({ path, label, enabled }));
 const sameRoots = (left: RootOption[], right: RootOption[]) => JSON.stringify(catalog(left)) === JSON.stringify(catalog(right));
 
-export function ScanRootsEditor({ settings }: { settings: Settings }) {
+export function ScanRootsEditor({ settings, collapsible = false }: { settings: Settings; collapsible?: boolean }) {
   useI18n();
   const [baseline, setBaseline] = useState(settings);
   const [draft, setDraft] = useState(() => rootOptions(settings));
@@ -79,8 +80,7 @@ export function ScanRootsEditor({ settings }: { settings: Settings }) {
     catch (error) { if (alive.current) setError(translate('无法加载最新设置：{error}', { error: errorMessage(error) })); }
     finally { operation.current = false; if (alive.current) setRefreshing(false); }
   };
-  return <section className="settings-card scan-roots-editor" aria-labelledby="scan-roots-title">
-    <div className="section-heading"><Folder size={19} /><h2 id="scan-roots-title">{translate("扫描目录")}</h2>{dirty && <span className="unsaved-label">{translate("未保存")}</span>}</div>
+  return <SettingsSection className="scan-roots-editor" headingId="scan-roots-title" title={translate('扫描目录')} icon={<Folder size={19} aria-hidden="true" />} collapsible={collapsible} headingExtra={dirty && <span className="unsaved-label">{translate('未保存')}</span>}>
     <p className="help-text">{translate("添加、删除或勾选下一次手动扫描要读取的目录。取消勾选不会删除已有库存或标签，保存也不会触发扫描。删除目录仅取消扫描配置，原文件与作品资料均保留。")}</p>
     <fieldset className="scan-root-choices" disabled={saving || refreshing || !editable}><legend className="sr-only">{translate("启用的扫描目录")}</legend>{draft.map(root => <div className={`root-item scan-root-option ${root.enabled ? 'selected' : ''}`} key={root.path}><label className="scan-root-select"><input type="checkbox" checked={root.enabled} onChange={() => toggle(root.path)} aria-label={translate('扫描 {name}', { name: root.label })} /><span className="scan-root-info"><strong>{root.label}</strong><code>{root.windowsPath}</code></span></label><span className={`badge ${root.available === false ? 'warning' : 'neutral'}`}>{root.available === false ? translate('暂不可用') : root.available === true ? translate('可读取') : translate('待保存')}</span><button className="scan-root-remove" onClick={() => updateDraft(draft.filter(value => value.path !== root.path))} aria-label={translate('删除目录 {name}', { name: root.label })} title={translate("只移除配置，不删除文件")}><Trash2 size={18} /></button></div>)}</fieldset>
     {!draft.length && <p className="help-text">{translate("尚未配置扫描目录，请添加素材所在的目录。")}</p>}
@@ -90,5 +90,5 @@ export function ScanRootsEditor({ settings }: { settings: Settings }) {
     {error && <p className="inline-error scan-root-feedback" role="alert"><CircleAlert size={15} />{translate(error)}</p>}
     {success && <p className="scan-root-success" role="status"><Check size={16} />{translate(success)}</p>}
     <div className="scan-root-actions"><button className="button primary" onClick={() => void save()} disabled={!dirty || !editable || saving || refreshing || conflict}>{saving ? <LoaderCircle className="spin" size={16} /> : <Check size={16} />}{saving ? translate('正在保存扫描目录') : translate('保存扫描目录')}</button>{(dirty || conflict) && <button className="button" onClick={() => void loadLatest()} disabled={saving || refreshing}>{refreshing ? <LoaderCircle className="spin" size={16} /> : <RefreshCw size={16} />}{refreshing ? translate('正在加载最新设置') : translate('放弃选择并加载最新设置')}</button>}</div>
-  </section>;
+  </SettingsSection>;
 }

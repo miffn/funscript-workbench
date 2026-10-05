@@ -20,6 +20,20 @@ async function ready() { render(<McpSettings />); await screen.findByText('MCP �
 function enterToken(token = savedToken) { fireEvent.change(screen.getByLabelText('Token'), { target: { value: token } }); }
 function clipboard() { const writeText = vi.fn().mockResolvedValue(undefined); vi.stubGlobal('navigator', { clipboard: { writeText } }); return writeText; }
 
+it('keeps a token in memory when its settings section is collapsed and reopened', async () => {
+  const view = render(<McpSettings collapsible />);
+  await screen.findByText('MCP 已启用 Token 认证，所有连接都必须携带 Token。');
+  const details = view.container.querySelector('details')!;
+  const summary = view.container.querySelector('summary')!;
+  expect(details.open).toBe(false);
+  fireEvent.click(summary); enterToken();
+  expect(details.open).toBe(true);
+  fireEvent.click(summary); expect(details.open).toBe(false);
+  fireEvent.click(summary);
+  expect((screen.getByLabelText('Token') as HTMLInputElement).value).toBe(savedToken);
+  expect(call).toHaveBeenCalledTimes(1);
+});
+
 it('uses one client-independent LAN command, requires a token and hides secrets in previews', async () => {
   const writeText = clipboard(); await ready();
   expect(screen.queryByLabelText('Agent 客户端')).toBeNull();

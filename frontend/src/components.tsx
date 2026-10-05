@@ -12,6 +12,7 @@ import { McpSettings } from './McpSettings';
 import { ReleaseDates, workDisplayTitle } from './ReleaseDates';
 import { ReleasePostEditor } from './ReleasePosts';
 import { SHOW_ES_POSTS } from './features';
+import { SettingsSection } from './SettingsSection';
 
 export function StatusBadge({ status }: { status: 'pending' | 'published' }) {
   useI18n(); return <span className={`badge ${status}`}><span className="status-dot" />{status === 'published' ? t("已发布") : t("待发布")}</span>; }
@@ -70,10 +71,18 @@ export function JobsPage({ revision }: { revision: number }) {
   const labels: Record<string, string> = { works: t("库存"), directories: t("编号目录"), assets: t("素材"), unnumbered: t("未编号素材"), unavailable_roots: t("不可用目录"), covers_generated: t("更新封面"), covers_failed: t("封面失败"), refresh_covers: t("重新生成封面"), script_id: t("作品编号"), file_count: t("生成文件"), clip_count: t("片段") };
   return <>{error && <ResourceError message={error} retry={retry} />}{loading ? <Loading label={t("正在读取任务记录")} /> : data && !data.items.length ? <EmptyState icon={<RefreshCw size={30} />} title={t("尚无任务记录")} description={t("执行库存扫描或生成作品预览后，会在这里留下记录。")} /> : <div className="job-list">{data?.items.map(job => <article className="job-card" key={job.id}><div className="job-head"><div className={`job-icon ${job.status === 'failed' ? 'error' : ''}`}>{isActiveJob(job) ? <LoaderCircle size={20} className="spin" /> : job.status === 'failed' ? <CircleAlert size={20} /> : <Check size={20} />}</div><div><h2>{job.type === 'preview' ? t("预览生成") : job.type === 'rematch' ? t("文件重新匹配") : t("库存扫描")} <span className="job-number">#{job.id}</span></h2><p>{formatDate(job.started_at || job.created_at)}{job.finished_at && <> {t("· 完成于")}{formatDate(job.finished_at)}</>}</p></div><span className={`badge ${job.status === 'failed' ? 'warning' : isActiveJob(job) ? 'pending' : 'published'}`}>{jobLabel(job.status, job.type)}</span></div>{job.result && <div className="job-results">{Object.entries(job.result).filter(([key, value]) => value != null && (job.type !== 'preview' || ['script_id', 'file_count', 'clip_count'].includes(key))).map(([key, value]) => <span key={key}><span>{labels[key] || key}</span><strong>{displayValue(value)}</strong></span>)}</div>}{job.error && <p className="inline-error" role="alert">{t(job.error)}</p>}{isActiveJob(job) && <p className="help-text">{job.type === 'preview' ? (job.message ? t(job.message) : '') || t("正在后台生成预览，关闭网页不会中断任务。") : job.type === 'rematch' ? (job.message ? t(job.message) : '') || t("正在重新匹配作品素材，关闭网页不会中断任务。") : t("正在读取文件与生成封面，关闭网页不会中断扫描。")}</p>}</article>)}</div>}</>;
 }
-export function SettingsPage({ capabilities, revision }: { capabilities: Capabilities; revision: number }) {
+export function SettingsPage({ capabilities, revision, collapsible = false }: { capabilities: Capabilities; revision: number; collapsible?: boolean }) {
   useI18n();
   const { data, error, loading, retry } = useResource<Settings>('/api/settings', revision);
-  return <>{error && <ResourceError message={error} retry={retry} />}{loading ? <Loading label={t("正在读取运行设置")} /> : data && <div className="settings-layout"><ScanRootsEditor settings={data} /><McpSettings /><section className="settings-card"><div className="section-heading"><RefreshCw size={19} /><h2>{t("扫描与库存规则")}</h2></div><dl className="settings-details"><dt>{t("扫描方式")}</dt><dd>{t("手动扫描，点击“立即扫描”更新库存")}</dd><dt>{t("编号来源")}</dt><dd>{t("文件夹编号，保留完整子编号")}</dd><dt>{t("发布状态")}</dt><dd>{t("ES 与 Patreon 分别维护待发布 / 已发布")}</dd><dt>{t("未编号素材")}</dt><dd>{t("不计入完成库存")}</dd><dt>{t("冲突处理")}</dt><dd>{t("保留全部路径并提醒，不自动覆盖")}</dd></dl></section><section className="settings-card"><div className="section-heading"><FolderOpen size={19} /><h2>{t("打开文件夹")}</h2></div><p className="host-ability">{capabilities.can_open_folder ? t("当前访问端支持打开素材主机的文件夹。") : (capabilities.reason ? t(capabilities.reason) : '') || t("不支持打开，仅素材所在主机可用。")}</p><p className="help-text">{t("其他客户端可以查看封面、管理库存与发布状态。")}</p></section></div>}</>;
+  return <>{error && <ResourceError message={error} retry={retry} />}{loading ? <Loading label={t("正在读取运行设置")} /> : data && <div className="settings-layout">
+    <ScanRootsEditor settings={data} collapsible={collapsible} /><McpSettings collapsible={collapsible} />
+    <SettingsSection title={t('扫描与库存规则')} icon={<RefreshCw size={19} aria-hidden="true" />} collapsible={collapsible}>
+      <dl className="settings-details"><dt>{t('扫描方式')}</dt><dd>{t('手动扫描，点击“立即扫描”更新库存')}</dd><dt>{t('编号来源')}</dt><dd>{t('文件夹编号，保留完整子编号')}</dd><dt>{t('发布状态')}</dt><dd>{t('ES 与 Patreon 分别维护待发布 / 已发布')}</dd><dt>{t('未编号素材')}</dt><dd>{t('不计入完成库存')}</dd><dt>{t('冲突处理')}</dt><dd>{t('保留全部路径并提醒，不自动覆盖')}</dd></dl>
+    </SettingsSection>
+    <SettingsSection title={t('打开文件夹')} icon={<FolderOpen size={19} aria-hidden="true" />} collapsible={collapsible}>
+      <p className="host-ability">{capabilities.can_open_folder ? t('当前访问端支持打开素材主机的文件夹。') : (capabilities.reason ? t(capabilities.reason) : '') || t('不支持打开，仅素材所在主机可用。')}</p><p className="help-text">{t('其他客户端可以查看封面、管理库存与发布状态。')}</p>
+    </SettingsSection>
+  </div>}</>;
 }
 
 export function WorkDetail({ id, capabilities, onClose, onSaved, notify }: { id: number; capabilities: Capabilities; onClose: () => void; onSaved: () => void; notify: (notice: Notice) => void }) {

@@ -1,3 +1,4 @@
+import { SettingsSection } from './SettingsSection';
 import { useI18n, translate } from './i18n';
 import { useEffect, useRef, useState } from 'react';
 import { Archive, Check, ImagePlus, LoaderCircle, Trash2, UserRound } from 'lucide-react';
@@ -16,7 +17,7 @@ async function requestProfile(init?: RequestInit): Promise<ProfileData> {
   return body;
 }
 
-export function ProfileSettings({ profile, onSaved }: { profile: ProfileData; onSaved: (profile: ProfileData) => void }) {
+export function ProfileSettings({ profile, onSaved, collapsible = false }: { profile: ProfileData; onSaved: (profile: ProfileData) => void; collapsible?: boolean }) {
   useI18n();
   const [baseline, setBaseline] = useState(profile);
   const [draft, setDraft] = useState(profile);
@@ -69,8 +70,7 @@ export function ProfileSettings({ profile, onSaved }: { profile: ProfileData; on
     finally { setBusy(false); }
   }
 
-  return <section className="settings-card profile-settings" aria-labelledby="profile-settings-title">
-    <h2 id="profile-settings-title"><UserRound size={20} aria-hidden="true" /> {translate("工作台资料")}</h2>
+  return <SettingsSection className="profile-settings" headingId="profile-settings-title" title={translate('工作台资料')} icon={<UserRound size={20} aria-hidden="true" />} collapsible={collapsible}>
     <p className="profile-help">{translate("修改侧边栏的头像、姓名和简介，保存后所有设备都会使用这份资料。")}</p>
     <form onSubmit={save}>
       <div className="profile-avatar-editor">
@@ -95,5 +95,5 @@ export function ProfileSettings({ profile, onSaved }: { profile: ProfileData; on
         {conflict && <button type="button" className="button" disabled={busy || reading} onClick={() => void reload()}>{translate("重新加载资料（替换当前输入）")}</button>}
       </div>
     </form>
-  </section>;
+  </SettingsSection>;
 }

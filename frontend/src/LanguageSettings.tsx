@@ -3,6 +3,7 @@ import { Languages, LoaderCircle } from 'lucide-react';
 import { errorMessage, request } from './api';
 import { getLanguage, setLanguage, useI18n } from './i18n';
 import type { Language, LanguageState } from './i18n';
+import { SettingsSection } from './SettingsSection';
 
 export function LanguageBootstrap() {
   const { locale } = useI18n();
@@ -29,7 +30,7 @@ export function LanguageBootstrap() {
   return null;
 }
 
-export function LanguageSettings() {
+export function LanguageSettings({ collapsible = false }: { collapsible?: boolean } = {}) {
   const { locale, t } = useI18n();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -46,8 +47,7 @@ export function LanguageSettings() {
       if (getLanguage().language !== locale) setSaved(false);
     } finally { setBusy(false); }
   };
-  return <section className="settings-card language-settings" aria-labelledby="language-settings-title">
-    <div className="section-heading"><Languages size={20} /><h2 id="language-settings-title">{t('界面语言')}</h2></div>
+  return <SettingsSection className="language-settings" headingId="language-settings-title" title={t('界面语言')} icon={<Languages size={20} aria-hidden="true" />} collapsible={collapsible}>
     <p className="help-text">{t('语言设置保存在数据库中，所有设备共用；作品标题、作者、标签和文件名保持原样。')}</p>
     <label htmlFor="interface-language">{t('显示语言')}</label>
     <select id="interface-language" value={locale} disabled={busy} onChange={event => void change(event.target.value as Language)}>
@@ -56,5 +56,5 @@ export function LanguageSettings() {
     {busy && <p className="help-text" role="status"><LoaderCircle size={16} className="spin" />{t('正在保存语言设置…')}</p>}
     {saved && <p className="help-text" role="status">{t('界面语言已保存')}</p>}
     {error && <p className="inline-error" role="alert">{t(error)}</p>}
-  </section>;
+  </SettingsSection>;
 }

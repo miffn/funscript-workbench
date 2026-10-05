@@ -218,7 +218,7 @@ export default function App() {
       {page === 'calendar' && <ReleaseCalendar revision={revision} onSelect={setSelected} onChanged={() => setRevision(value => value + 1)} />}
       {page === 'issues' && <IssuesPage revision={revision} onSelect={setSelected} />}
       {page === 'jobs' && <JobsPage revision={revision} />}
-      {page === 'settings' && <><LanguageSettings />{profileLoading ? <p className="loading-state" role="status">{t("正在读取工作台资料…")}</p> : profileError ? <div className="notice error" role="alert"><span>{t(profileError)}</span><button className="button small" onClick={() => setProfileRetry(value => value + 1)}>{t("重试读取资料")}</button></div> : <ProfileSettings profile={profile} onSaved={value => { setProfile(value); notify({ kind: 'success', message: t("工作台资料已保存") }); }} />}{SHOW_ES_POSTS && <EsTemplateSettings />}<SettingsPage capabilities={capabilities} revision={revision} /></>}
+      {page === 'settings' && <><LanguageSettings collapsible />{profileLoading ? <p className="loading-state" role="status">{t("正在读取工作台资料…")}</p> : profileError ? <div className="notice error" role="alert"><span>{t(profileError)}</span><button className="button small" onClick={() => setProfileRetry(value => value + 1)}>{t("重试读取资料")}</button></div> : <ProfileSettings collapsible profile={profile} onSaved={value => { setProfile(value); notify({ kind: 'success', message: t("工作台资料已保存") }); }} />}{SHOW_ES_POSTS && <EsTemplateSettings />}<SettingsPage collapsible capabilities={capabilities} revision={revision} /></>}
       {page === 'tags' && <TagsPage revision={revision} onChanged={() => setRevision(value => value + 1)} />}
       <footer className="page-footer"><span>{t("Funscript 工作台")}</span><span>{t("库存与状态保存在服务端")}</span></footer>
     </main>
