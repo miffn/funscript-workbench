@@ -10,6 +10,7 @@ export interface InventoryPosition {
   tagId: number | null; untaggedOnly: boolean; view: 'gallery' | 'list' | 'tags';
   scrollY: number; focusWorkId?: number;
   tagIds?: number[]; sortPlatform?: 'es' | 'patreon'; sortDirection?: 'asc' | 'desc';
+  snapshotId?: string;
 }
 export interface NavigationEntry {
   index: number; inventory?: InventoryPosition; returnInventory?: InventoryPosition;
@@ -41,6 +42,7 @@ function position(value: unknown): InventoryPosition | undefined {
     ...(Array.isArray(item.tagIds) ? { tagIds: item.tagIds.filter(id => Number.isSafeInteger(id) && id > 0).slice(0, 100) } : {}),
     ...(['es', 'patreon'].includes(item.sortPlatform || '') ? { sortPlatform: item.sortPlatform } : {}),
     ...(['asc', 'desc'].includes(item.sortDirection || '') ? { sortDirection: item.sortDirection } : {}),
+    ...(typeof item.snapshotId === 'string' && /^[a-f0-9]{32}$/.test(item.snapshotId) ? { snapshotId: item.snapshotId } : {}),
     ...(Number.isSafeInteger(item.focusWorkId) && item.focusWorkId! > 0 ? { focusWorkId: item.focusWorkId } : {}) };
 }
 

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import App from './App';
 import { setLanguage } from './i18n';
@@ -40,6 +40,47 @@ it('sorts on the server before pagination and persists the selected platform and
   fireEvent.click(screen.getByRole('button', { name: '当前从新到旧，点击切换从旧到新' }));
   await waitFor(() => expect(inventoryParams().get('sort_direction')).toBe('asc'));
   expect(localStorage.getItem('workbench-sort-platform')).toBe('patreon');
+});
+
+it('appends exactly one snapshot batch when the bottom observer fires twice', async () => {
+  let bottomCallback: IntersectionObserverCallback | undefined;
+  let bottomObserver: IntersectionObserver | undefined;
+  vi.stubGlobal('IntersectionObserver', class {
+    constructor(callback: IntersectionObserverCallback, options?: IntersectionObserverInit) {
+      if (options?.rootMargin === '0px 0px 160px 0px') { bottomCallback = callback; bottomObserver = this as unknown as IntersectionObserver; }
+    }
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  });
+  const first = Array.from({ length: 24 }, (_, index) => ({ ...work, id: index + 1, script_id: `S${String(index + 1).padStart(3, '0')}` }));
+  const next = first.map(item => ({ ...item, id: item.id + 24, script_id: `S${String(item.id + 24).padStart(3, '0')}` }));
+  const envelope = { total: 72, page_size: 24, snapshot_id: 'shared-snapshot', inventory_revision: 1,
+    stats: { total: 72, pending: 72, to_make: 0, published: 0, issues: 0 }, last_scan: null };
+  const originalFetch = fetchMock.getMockImplementation() as (path: string, options?: RequestInit) => Promise<Response>;
+  let resolveNext: (response: Response) => void = () => {};
+  fetchMock.mockImplementation((path: string, options?: RequestInit) => {
+    if (path.startsWith('/api/works?')) {
+      const page = new URL(path, 'http://localhost').searchParams.get('page');
+      return page === '1' ? Promise.resolve(response({ ...envelope, items: first, page: 1 })) : new Promise<Response>(resolve => { resolveNext = resolve; });
+    }
+    if (path === '/api/inventory-revision') return Promise.resolve(response({ inventory_revision: 1, scan_active: false }));
+    return originalFetch(path, options);
+  });
+  render(<App />);
+  await screen.findByText('已加载 24 / 72 个库存');
+  expect(bottomCallback).toBeDefined();
+  act(() => {
+    bottomCallback!([{ isIntersecting: true }] as IntersectionObserverEntry[], bottomObserver!);
+    bottomCallback!([{ isIntersecting: true }] as IntersectionObserverEntry[], bottomObserver!);
+  });
+  await waitFor(() => expect(fetchMock.mock.calls.filter(([path]) => String(path).startsWith('/api/works?'))).toHaveLength(2));
+  expect(inventoryParams().get('page')).toBe('2'); expect(inventoryParams().get('snapshot_id')).toBe('shared-snapshot');
+  expect(screen.getByText('已加载 24 / 72 个库存')).toBeTruthy();
+  await act(async () => resolveNext(response({ ...envelope, items: next, page: 2 })));
+  await screen.findByText('已加载 48 / 72 个库存');
+  expect(document.querySelectorAll('.work-card')).toHaveLength(48);
+  expect(fetchMock.mock.calls.filter(([path]) => String(path).startsWith('/api/works?'))).toHaveLength(2);
 });
 
 it('keeps navigation accessible when collapsed and places the expand control below the theme control', async () => {

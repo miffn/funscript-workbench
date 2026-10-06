@@ -136,7 +136,7 @@ class ReleaseCalendar:
                                        'platform': platform, 'mode': mode, 'date': day,
                                        'published': work[f'{platform}_published'], 'revision': work['revision']})
         events.sort(key=lambda item: (item['date'], item['script_id'] or '', item['work_id'], item['platform'], item['mode']))
-        return {'month': month, 'today': release_today(), 'events': events, 'works': works}
+        return {'month': month, 'today': release_today(self.store), 'events': events, 'works': works}
 
     def update(self, edit: CalendarEdit) -> dict:
         with self.store.connection() as db:

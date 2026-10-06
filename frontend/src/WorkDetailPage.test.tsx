@@ -94,7 +94,7 @@ it('clears a cancelled pending destination and allows clean navigation after sav
 });
 
 it('uses the same unsaved matching guard for page navigation as for the default dialog', async () => {
-  const { ref } = page(); await screen.findByLabelText('标题'); fireEvent.click(screen.getByRole('tab', { name: '素材' })); const pitch = await screen.findByLabelText('Pitch · 俯仰');
+  const { ref } = page(); await screen.findByLabelText('标题'); fireEvent.click(screen.getByRole('tab', { name: '预览生成与匹配' })); const pitch = await screen.findByLabelText('Pitch · 俯仰');
   fireEvent.change(pitch, { target: { value: '22' } });
   await screen.findByRole('button', { name: '放弃调整' });
   const next = vi.fn(); act(() => ref.current!.requestLeave(next));
@@ -168,7 +168,7 @@ it('protects only unsaved page text from cross-document navigation and removes t
 });
 
 it('protects unsaved script mappings from refresh and clears the native guard when mappings are discarded', async () => {
-  page(); await screen.findByLabelText('标题'); fireEvent.click(screen.getByRole('tab', { name: '素材' })); const pitch = await screen.findByLabelText('Pitch · 俯仰');
+  page(); await screen.findByLabelText('标题'); fireEvent.click(screen.getByRole('tab', { name: '预览生成与匹配' })); const pitch = await screen.findByLabelText('Pitch · 俯仰');
   fireEvent.change(pitch, { target: { value: '22' } }); await screen.findByRole('button', { name: '放弃调整' });
   const dirty = new Event('beforeunload', { cancelable: true }); window.dispatchEvent(dirty); expect(dirty.defaultPrevented).toBe(true);
   fireEvent.click(screen.getByRole('button', { name: '放弃调整' }));

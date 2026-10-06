@@ -1,9 +1,9 @@
 import { workIdentity } from './api';
 import { translate as t, useI18n } from './i18n';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowLeft, ArrowRight, ArrowDownWideNarrow, ArrowUpWideNarrow, Check, CheckCheck, CalendarDays, CircleAlert, Clock3, FilePenLine, FileText, Film, LayoutGrid, List, LoaderCircle, Moon, PanelLeftClose, PanelLeftOpen, RefreshCw, Search, Settings2, SlidersHorizontal, Sun, Tag as TagIcon, X } from 'lucide-react';
+import { ArrowUp, ArrowRight, ArrowDownWideNarrow, ArrowUpWideNarrow, Check, CheckCheck, CalendarDays, CircleAlert, Clock3, FilePenLine, FileText, Film, LayoutGrid, List, LoaderCircle, Moon, PanelLeftClose, PanelLeftOpen, RefreshCw, Search, Settings2, SlidersHorizontal, Sun, Tag as TagIcon, X } from 'lucide-react';
 import { errorMessage, formatDate, isActiveJob, request } from './api';
-import type { Capabilities, Filter, Inventory, Job, Work, WorkLinkKind, WorkLinks, WorkTags } from './api';
+import type { Capabilities, Filter, Job, Work, WorkLinkKind, WorkLinks, WorkTags } from './api';
 import { WorkLinkButtons, WorkLinkEditor } from './WorkLinks';
 import { workDisplayTitle } from './ReleaseDates';
 import { PersonalPage } from './PersonalPage';
@@ -18,12 +18,16 @@ import { Cover, EmptyState, Loading, WorkDetail, IssuesPage, JobsPage, Publicati
 import type { WorkDetailHandle } from './components';
 import { initialNavigation, useWorkbenchNavigation } from './useWorkbenchNavigation';
 import type { InventoryPosition, Page } from './useWorkbenchNavigation';
+import { useInventoryFeed } from './useInventoryFeed';
+import { useWorkspaceTimezoneBootstrap } from './WorkspaceTimezone';
+import { motionIsReduced } from './Preferences';
 
 export type Notice = { kind: 'success' | 'error' | 'info'; message: string };
 const EMPTY_STATS = { total: 0, pending: 0, to_make: 0, published: 0, es_published: 0, patreon_published: 0, issues: 0 };
 const PAGE_SIZE = 24;
 export default function App() {
   useI18n();
+  useWorkspaceTimezoneBootstrap();
   const [initial] = useState(initialNavigation);
   const [page, setPage] = useState<Page>(initial.route.page);
   const [detailId, setDetailId] = useState<number | null>(initial.route.workId);
@@ -32,9 +36,6 @@ export default function App() {
   const [query, setQuery] = useState(initial.inventory?.query || '');
   const [search, setSearch] = useState(initial.inventory?.search || '');
   const [number, setNumber] = useState(initial.inventory?.number || 1);
-  const [inventory, setInventory] = useState<Inventory | null>(null);
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(true);
   const [revision, setRevision] = useState(0);
   const [selected, setSelected] = useState<number | null>(null);
   const [tagWork, setTagWork] = useState<Work | null>(null);
@@ -80,8 +81,27 @@ export default function App() {
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const detailGuard = useRef<WorkDetailHandle>(null);
   const restorePosition = useRef<InventoryPosition | undefined>(initial.route.page === 'inventory' ? initial.inventory : undefined);
-  const loadedInventory = useRef<string | null>(null);
-  const inventoryKey = JSON.stringify([filter, search, number, issuesOnly, tagIds, untaggedOnly, sortPlatform, sortDirection]);
+  const params = new URLSearchParams({ q: search, status: filter, issues_only: String(issuesOnly), sort_platform: sortPlatform, sort_direction: sortDirection });
+  if (tagIds.length) params.set('tag_ids', [...tagIds].sort((a, b) => a - b).join(','));
+  if (untaggedOnly) params.set('untagged_only', 'true');
+  const inventoryKey = params.toString();
+  const feed = useInventoryFeed(inventoryKey, number, revision, page === 'inventory', initial.inventory?.snapshotId, !!job && job.type === 'scan' && isActiveJob(job));
+  const { inventory, setInventory, error, loading } = feed;
+  const bottom = useRef<HTMLDivElement>(null);
+  const appendPending = useRef(false);
+  const [showBackToTop, setShowBackToTop] = useState(false);
+  const loadMore = useCallback(() => { if (feed.hasMore && !feed.loadingMore && !feed.appendError && !appendPending.current) { appendPending.current = true; setNumber(value => value + 1); } }, [feed.hasMore, feed.loadingMore, feed.appendError]);
+  useEffect(() => { if (!feed.loadingMore && feed.loadedPages >= Math.min(number, Math.max(1, Math.ceil((inventory?.total || 0) / PAGE_SIZE)))) appendPending.current = false; }, [feed.loadingMore, feed.loadedPages, inventory?.total, number]);
+  useEffect(() => {
+    if (page !== 'inventory' || !bottom.current || !feed.hasMore || !('IntersectionObserver' in window)) return;
+    const observer = new IntersectionObserver(entries => { if (entries.some(entry => entry.isIntersecting)) loadMore(); }, { rootMargin: '0px 0px 160px 0px' });
+    observer.observe(bottom.current); return () => observer.disconnect();
+  }, [page, feed.hasMore, loadMore]);
+  useEffect(() => {
+    const update = () => setShowBackToTop(window.scrollY > window.innerHeight);
+    update(); window.addEventListener('scroll', update, { passive: true });
+    return () => window.removeEventListener('scroll', update);
+  }, []);
   const restoreInventory = (saved: InventoryPosition) => {
     setFilter(saved.filter); setQuery(saved.query); setSearch(saved.search); setNumber(saved.number);
     setIssuesOnly(saved.issuesOnly); setTagIds(saved.tagIds || (saved.tagId ? [saved.tagId] : [])); setUntaggedOnly(saved.untaggedOnly); setView(saved.view);
@@ -89,12 +109,9 @@ export default function App() {
   };
   const { navigate, openWork, backToInventory, returnPage } = useWorkbenchNavigation({
     detailRef: detailGuard,
-    getInventory: () => ({ filter, query, search, number, issuesOnly, tagId, tagIds, untaggedOnly, sortPlatform, sortDirection, view, scrollY: window.scrollY }),
+    getInventory: () => ({ filter, query, search, number, issuesOnly, tagId, tagIds, untaggedOnly, sortPlatform, sortDirection, view, scrollY: window.scrollY, snapshotId: inventory?.snapshot_id }),
     onRoute: (route, saved) => {
       restorePosition.current = undefined;
-      if (route.page === 'inventory' && (page === 'detail' || saved.inventory)) {
-        loadedInventory.current = null; setRevision(value => value + 1);
-      }
       setPage(route.page); setDetailId(route.workId);
       if (route.page === 'inventory' && saved.inventory) {
         restoreInventory(saved.inventory); restorePosition.current = saved.inventory;
@@ -103,8 +120,8 @@ export default function App() {
     },
   });
   useEffect(() => {
-    if (page !== 'inventory' || loading || !inventory || !restorePosition.current
-        || (loadedInventory.current !== inventoryKey && !error)) return;
+    if (page !== 'inventory' || loading || feed.loadingMore || !inventory || !restorePosition.current
+        || (feed.loadedKey !== inventoryKey && !error) || feed.loadedPages < Math.min(number, Math.max(1, Math.ceil(inventory.total / PAGE_SIZE)))) return;
     const saved = restorePosition.current;
     const frame = requestAnimationFrame(() => {
       if (restorePosition.current !== saved) return;
@@ -114,7 +131,7 @@ export default function App() {
       window.scrollTo({ top: saved.scrollY, behavior: 'auto' });
     });
     return () => cancelAnimationFrame(frame);
-  }, [page, loading, inventory, inventoryKey, error]);
+  }, [page, loading, feed.loadingMore, feed.loadedKey, feed.loadedPages, number, inventory, inventoryKey, error]);
   const notify = useCallback((next: Notice) => {
     if (noticeTimer.current) clearTimeout(noticeTimer.current);
     setNotice(next);
@@ -131,29 +148,6 @@ export default function App() {
     request<Capabilities>('/api/capabilities', { signal: controller.signal }).then(setCapabilities).catch(error => { if (!controller.signal.aborted) setCapabilities({ can_open_folder: false, reason: t("无法确认主机能力：{0}", {"0": errorMessage(error)}) }); });
     return () => controller.abort();
   }, [revision]);
-  useEffect(() => {
-    let alive = true;
-    let controller: AbortController | null = null;
-    let inFlight = false;
-    setLoading(true);
-    const load = async () => {
-      if (inFlight) return;
-      inFlight = true;
-      controller = new AbortController();
-      const params = new URLSearchParams({ q: search, status: filter, issues_only: String(issuesOnly), page: String(number), page_size: String(PAGE_SIZE) });
-      params.set('sort_platform', sortPlatform); params.set('sort_direction', sortDirection);
-      if (tagIds.length) params.set('tag_ids', tagIds.join(','));
-      if (untaggedOnly) params.set('untagged_only', 'true');
-      try {
-        const result = await request<Inventory>(`/api/works?${params}`, { signal: controller.signal });
-        if (alive) { loadedInventory.current = inventoryKey; setInventory(result); setError(''); if (number > 1 && !result.items.length) setNumber(Math.max(1, Math.ceil(result.total / PAGE_SIZE))); }
-      } catch (error) { if (alive && !controller.signal.aborted) setError(errorMessage(error)); }
-      finally { inFlight = false; if (alive) setLoading(false); }
-    };
-    void load();
-    const timer = setInterval(() => void load(), 10000);
-    return () => { alive = false; clearInterval(timer); controller?.abort(); };
-  }, [search, filter, issuesOnly, number, revision, tagIds, untaggedOnly, sortPlatform, sortDirection]);
   useEffect(() => {
     let alive = true;
     let controller: AbortController | null = null;
@@ -218,7 +212,6 @@ export default function App() {
   };
   const title = page === 'inventory' ? filter === 'to_make' ? t('待制作库存') : filter === 'pending' ? t("待发布库存") : filter === 'es_published' ? t("ES 已发布作品") : filter === 'patreon_published' ? t("Patreon 已发布作品") : filter === 'published' ? t("全部平台已发布作品") : t("脚本库存") : page === 'issues' ? t("待处理") : page === 'jobs' ? t("任务记录") : page === 'tags' ? t("标签管理") : page === 'calendar' ? t("发布日历") : page === 'profile' ? t('个人中心') : t("工作台设置");
   const subtitle = page === 'inventory' ? filter === 'to_make' ? t('添加脚本并扫描或重新匹配后，还需在作品详情手动确认制作完成；有脚本且尚未全部发布的作品才会进入待发布。') : t('查找素材，整理标签，继续你的创作。') : page === 'issues' ? t("查看编号冲突、缺失素材和历史资料的关联问题。") : page === 'jobs' ? t("库存扫描与预览生成的执行进度、结果和失败原因。") : page === 'tags' ? t("统一维护作者与分类，作品绑定标签后复用资料。") : page === 'calendar' ? t("安排发布计划，记录 ES 与 Patreon 的实际发布日期。") : page === 'profile' ? t('你的资料与个人工作台。') : t("当前扫描目录与工作台的运行规则。");
-  const totalPages = Math.max(1, Math.ceil((inventory?.total || 0) / PAGE_SIZE));
   const tagsSaved = (value: WorkTags) => {
     setInventory(previous => previous ? { ...previous, items: previous.items.map(work => work.id === value.work_id ? { ...work, tags: value.tags, tags_revision: value.tags_revision } : work) } : previous);
     setRevision(value => value + 1); notify({ kind: 'success', message: t("作品标签已保存") });
@@ -263,10 +256,11 @@ export default function App() {
         <div className="inventory-overview"><span><strong>{inventory ? inventory.total : '—'}</strong> {t("个库存", { count: inventory?.total || 0 })}</span><div className="inventory-sort"><span>{t('发布日期')}</span><div className="view-switch" aria-label={t('按平台发布日期排序')}>{(['es', 'patreon'] as const).map(platform => <button key={platform} className="icon-button" aria-pressed={sortPlatform === platform} onClick={() => changeSortPlatform(platform)}>{platform === 'es' ? 'ES' : 'Patreon'}</button>)}</div><button className="icon-button" aria-label={t(sortDirection === 'desc' ? '当前从新到旧，点击切换从旧到新' : '当前从旧到新，点击切换从新到旧')} onClick={() => changeSortDirection(sortDirection === 'desc' ? 'asc' : 'desc')}>{sortDirection === 'desc' ? <ArrowDownWideNarrow size={18} /> : <ArrowUpWideNarrow size={18} />}</button></div></div>
         {tagError && <div className="notice error" role="alert"><span>{t("无法读取标签筛选：")}{t(tagError)}</span><button className="button small" onClick={refreshTags}>{t("重试")}</button></div>}
         {error && <div className="notice error" role="alert"><span><CircleAlert size={18} />{t("无法更新库存：")}{t(error)}. {inventory ? t("当前显示上次读取的数据。") : ''}</span><button className="button small" onClick={() => setRevision(value => value + 1)}>{t("重试")}</button></div>}
-        {loading ? <Loading /> : !inventory ? <EmptyState title={t("暂时无法读取库存")} description={t("确认工作台服务已启动，然后重新连接。")}><button className="button" onClick={() => setRevision(value => value + 1)}><RefreshCw size={16} />{t("重新连接")}</button></EmptyState> : !inventory.items.length ? <EmptyState title={search || issuesOnly || tagIds.length || untaggedOnly ? t("没有符合条件的作品") : filter === 'to_make' ? t('暂无待制作作品') : filter === 'pending' ? t('暂无待发布作品') : filter !== 'all' ? t("没有符合条件的作品") : t("这里还没有库存")} description={search || issuesOnly || tagIds.length || untaggedOnly ? t("换一个编号、标题或标签，或取消筛选。") : filter === 'to_make' ? t('无脚本的编号目录会在扫描后显示；补齐脚本后仍需手动确认制作完成。') : filter === 'pending' ? t('已有脚本、制作已确认且尚未全部发布的作品会显示在这里。') : t("将作品文件夹放入配置的扫描目录后，点击“立即扫描”更新库存。")}>{(search || issuesOnly || tagIds.length > 0 || untaggedOnly) && <button className="button" onClick={clearFilters}>{t("清除筛选")}</button>}</EmptyState> : view === 'tags' ? <div className="work-tag-list" aria-label={t("快速标签库存列表")}>{inventory.items.map(work => <article className="work-tag-row" key={work.id}><div className="work-tag-identity"><span className="script-id">{workIdentity(work)}</span><PublicationBadges work={work} />{workDisplayTitle(work) && <h2>{workDisplayTitle(work)}</h2>}</div><TagChips tags={work.tags} durationStatus={work.duration_status} durationError={work.duration_error} /><WorkLinkButtons work={work} onEdit={kind => setLinkWork({ work, kind })} /><button className="button small" onClick={() => setTagWork(work)} aria-label={t("编辑标签 {0}", {"0": workIdentity(work)})}><TagIcon size={15} />{t("编辑标签")}</button></article>)}</div> : <div className={`work-collection ${view}`} aria-label={t("库存作品")}>
-          {inventory.items.map(work => <article key={work.id} className="work-card"><button type="button" className="work-card-target" data-work-id={work.id} onClick={() => view === 'gallery' ? openWork(work.id) : setSelected(work.id)} aria-label={t("查看 {0} {1}", {"0": workIdentity(work), "1": workDisplayTitle(work) || ""}).trim()} /><Cover work={work} /><div className="work-info"><div className="work-topline"><span className="script-id">{workIdentity(work)}</span>{workDisplayTitle(work) && <h2>{workDisplayTitle(work)}</h2>}</div><PublicationBadges work={work} /><TagChips tags={work.tags} durationStatus={work.duration_status} durationError={work.duration_error} /><div className="work-foot"><span className="asset-count"><Film size={15} />{work.video_count} {t('视频')}<FileText size={15} />{work.script_count} {t('脚本')}</span><button className="card-edit-tags text-action" onClick={() => setTagWork(work)} aria-label={t("编辑标签 {0}", {"0": workIdentity(work)})}><TagIcon size={15} />{t('编辑标签')}</button></div><WorkLinkButtons work={work} onEdit={kind => setLinkWork({ work, kind })} />{!!work.issues.length && <span className="issue-label"><CircleAlert size={14} />{work.issues.length} {t("项异常")}</span>}</div></article>)}
+        {loading ? <Loading /> : !inventory ? <EmptyState title={t("暂时无法读取库存")} description={t("确认工作台服务已启动，然后重新连接。")}><button className="button" onClick={() => setRevision(value => value + 1)}><RefreshCw size={16} />{t("重新连接")}</button></EmptyState> : !inventory.items.length ? <EmptyState title={search || issuesOnly || tagIds.length || untaggedOnly ? t("没有符合条件的作品") : filter === 'to_make' ? t('暂无待制作作品') : filter === 'pending' ? t('暂无待发布作品') : filter !== 'all' ? t("没有符合条件的作品") : t("这里还没有库存")} description={search || issuesOnly || tagIds.length || untaggedOnly ? t("换一个编号、标题或标签，或取消筛选。") : filter === 'to_make' ? t('无脚本的编号目录会在扫描后显示；补齐脚本后仍需手动确认制作完成。') : filter === 'pending' ? t('已有脚本、制作已确认且尚未全部发布的作品会显示在这里。') : t("将作品文件夹放入配置的扫描目录后，点击“立即扫描”更新库存。")}>{(search || issuesOnly || tagIds.length > 0 || untaggedOnly) && <button className="button" onClick={clearFilters}>{t("清除筛选")}</button>}</EmptyState> : view === 'tags' ? <div className="work-tag-list" aria-label={t("快速标签库存列表")}>{inventory.items.map(work => <article className="work-tag-row" key={work.id} data-inventory-work={work.id}><div className="work-tag-identity"><span className="script-id">{workIdentity(work)}</span><PublicationBadges work={work} />{workDisplayTitle(work) && <h2>{workDisplayTitle(work)}</h2>}</div><TagChips tags={work.tags} durationStatus={work.duration_status} durationError={work.duration_error} /><WorkLinkButtons work={work} onEdit={kind => setLinkWork({ work, kind })} /><button className="button small" onClick={() => setTagWork(work)} aria-label={t("编辑标签 {0}", {"0": workIdentity(work)})}><TagIcon size={15} />{t("编辑标签")}</button></article>)}</div> : <div className={`work-collection ${view}`} aria-label={t("库存作品")}>
+          {inventory.items.map(work => <article key={work.id} className="work-card" data-inventory-work={work.id}><button type="button" className="work-card-target" data-work-id={work.id} onClick={() => view === 'gallery' ? openWork(work.id) : setSelected(work.id)} aria-label={t("查看 {0} {1}", {"0": workIdentity(work), "1": workDisplayTitle(work) || ""}).trim()} /><Cover work={work} /><div className="work-info"><div className="work-topline"><span className="script-id">{workIdentity(work)}</span>{workDisplayTitle(work) && <h2>{workDisplayTitle(work)}</h2>}</div><PublicationBadges work={work} /><TagChips tags={work.tags} durationStatus={work.duration_status} durationError={work.duration_error} /><div className="work-foot"><span className="asset-count"><Film size={15} />{work.video_count} {t('视频')}<FileText size={15} />{work.script_count} {t('脚本')}</span><button className="card-edit-tags text-action" onClick={() => setTagWork(work)} aria-label={t("编辑标签 {0}", {"0": workIdentity(work)})}><TagIcon size={15} />{t('编辑标签')}</button></div><WorkLinkButtons work={work} onEdit={kind => setLinkWork({ work, kind })} />{!!work.issues.length && <span className="issue-label"><CircleAlert size={14} />{work.issues.length} {t("项异常")}</span>}</div></article>)}
         </div>}
-        {!!inventory?.total && <div className="pagination"><span>{t('第 {page} / {pages} 页 · 每页 {size} 个', { page: Math.min(number, totalPages), pages: totalPages, size: PAGE_SIZE })}</span><div><button className="icon-button" aria-label={t("上一页")} onClick={() => { setNumber(value => value - 1); window.scrollTo({ top: 0, behavior: 'auto' }); }} disabled={number <= 1 || loading}><ArrowLeft size={17} /></button><span aria-live="polite">{number}</span><button className="icon-button" aria-label={t("下一页")} onClick={() => { setNumber(value => value + 1); window.scrollTo({ top: 0, behavior: 'auto' }); }} disabled={number >= totalPages || loading}><ArrowRight size={17} /></button></div></div>}
+        {!!inventory?.total && <div ref={bottom} className="inventory-loadbar" role="status"><span>{t('已加载 {count} / {total} 个库存', { count: inventory.items.length, total: inventory.total })}</span>{feed.loadingMore ? <span><LoaderCircle size={17} className="spin" />{t('正在加载更多库存…')}</span> : feed.appendError ? <span className="feed-error">{t(feed.appendError)}<button className="text-action" onClick={feed.retry}>{t('重试加载')}</button></span> : feed.hasMore ? <button className="text-action" onClick={loadMore}>{t('加载更多')}</button> : <span>{t('已展示全部库存')}</span>}</div>}
+        {showBackToTop && <button className="back-to-top" aria-label={t('回到顶部')} onClick={() => window.scrollTo({ top: 0, behavior: motionIsReduced() ? 'auto' : 'smooth' })}><ArrowUp size={19} /><span>{t('回顶')}</span></button>}
       </>}
       {page === 'calendar' && <ReleaseCalendar revision={revision} onSelect={openWork} onChanged={() => setRevision(value => value + 1)} />}
       {page === 'issues' && <IssuesPage revision={revision} onSelect={openWork} onChanged={() => setRevision(value => value + 1)} />}

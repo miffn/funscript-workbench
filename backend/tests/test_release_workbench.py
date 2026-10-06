@@ -57,7 +57,7 @@ def test_tag_categories_or_within_and_between_and_legacy_filters(client):
 
 
 def test_atomic_release_editor_and_calendar_conflict_preserve_links(client, monkeypatch):
-    monkeypatch.setattr('backend.work_links.release_today', lambda: '2026-10-06')
+    monkeypatch.setattr('backend.work_links.release_today', lambda store=None: '2026-10-06')
     work_id = client.get('/api/works').json()['items'][0]['id']
     path = f'/api/works/{work_id}/links'
     before = client.get(path).json()
@@ -82,7 +82,7 @@ def test_atomic_release_editor_and_calendar_conflict_preserve_links(client, monk
 
 
 def test_unpublished_platform_new_link_sets_today_but_replacement_preserves_date(client, monkeypatch):
-    monkeypatch.setattr('backend.work_links.release_today', lambda: '2026-10-06')
+    monkeypatch.setattr('backend.work_links.release_today', lambda store=None: '2026-10-06')
     work_id = client.get('/api/works').json()['items'][0]['id']
     path = f'/api/works/{work_id}'
     client.patch(path, json={'patreon_published_date': '2026-01-01'})
@@ -90,7 +90,7 @@ def test_unpublished_platform_new_link_sets_today_but_replacement_preserves_date
     state = client.patch(path + '/links', json={'expected_revision': state['links_revision'],
         'links': {'patreon': 'https://example.test/first'}}).json()
     assert state['patreon_published'] is True and state['patreon_published_date'] == '2026-10-06'
-    monkeypatch.setattr('backend.work_links.release_today', lambda: '2026-10-07')
+    monkeypatch.setattr('backend.work_links.release_today', lambda store=None: '2026-10-07')
     state = client.patch(path + '/links', json={'expected_revision': state['links_revision'],
         'links': {'patreon': 'https://example.test/second', 'video': 'https://example.test/video'}}).json()
     assert state['patreon_published_date'] == '2026-10-06' and state['es_published'] is False

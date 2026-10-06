@@ -61,7 +61,7 @@ def test_plans_preserve_actual_and_both_platforms(inventory):
 
 def test_grid_neighbor_dates_full_ids_and_private_exclusion(inventory, monkeypatch):
     _, client, _ = inventory
-    monkeypatch.setattr('backend.release_calendar.release_today', lambda: '2026-10-03')
+    monkeypatch.setattr('backend.release_calendar.release_today', lambda store=None: '2026-10-03')
     update(client, state(client, 'S025_001'), day='2026-09-28')
     update(client, state(client, 'S025'), mode='planned', day='2026-11-01')
     result = client.get('/api/release-calendar?month=2026-10').json()

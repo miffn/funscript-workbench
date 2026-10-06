@@ -41,7 +41,10 @@ CREATE TABLE IF NOT EXISTS assets (
 );
 CREATE TABLE IF NOT EXISTS covers (
  work_id INTEGER PRIMARY KEY REFERENCES works(id), fingerprint TEXT NOT NULL,
- path TEXT, error TEXT, source_path TEXT NOT NULL, updated_at TEXT NOT NULL
+ path TEXT, error TEXT, source_path TEXT NOT NULL, updated_at TEXT NOT NULL,
+ mode TEXT NOT NULL DEFAULT 'automatic', revision INTEGER NOT NULL DEFAULT 0,
+ video_asset_id INTEGER, time_seconds REAL, crop TEXT,
+ automatic_path TEXT, automatic_fingerprint TEXT, automatic_source_path TEXT
 );
 CREATE TABLE IF NOT EXISTS issues (
  id INTEGER PRIMARY KEY, type TEXT NOT NULL, message TEXT NOT NULL,
@@ -96,6 +99,11 @@ CREATE TABLE IF NOT EXISTS work_links (
  overrides TEXT NOT NULL DEFAULT '{}',
  revision INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS release_calendar_plans (
+ work_id INTEGER PRIMARY KEY REFERENCES works(id),
+ es_planned_date TEXT, patreon_planned_date TEXT,
+ revision INTEGER NOT NULL DEFAULT 0
+);
 CREATE TABLE IF NOT EXISTS video_duration_cache (
  path TEXT PRIMARY KEY, size INTEGER NOT NULL, mtime_ns INTEGER NOT NULL,
  seconds TEXT NOT NULL, updated_at TEXT NOT NULL
@@ -127,6 +135,52 @@ FOLDER_COLUMNS = (
     ('preview_stale', 'INTEGER NOT NULL DEFAULT 0 CHECK(preview_stale IN (0,1))'),
 )
 CANDIDATE_SCHEMA = SCHEMA[SCHEMA.index('CREATE TABLE IF NOT EXISTS scan_candidates'):SCHEMA.index('CREATE INDEX IF NOT EXISTS idx_assets_directory')]
+
+COVER_COLUMNS = (
+    ('mode', "TEXT NOT NULL DEFAULT 'automatic'"), ('revision', 'INTEGER NOT NULL DEFAULT 0'),
+    ('video_asset_id', 'INTEGER'), ('time_seconds', 'REAL'), ('crop', 'TEXT'),
+    ('automatic_path', 'TEXT'), ('automatic_fingerprint', 'TEXT'), ('automatic_source_path', 'TEXT'),
+)
+INVENTORY_TABLES = (
+    'works', 'directories', 'assets', 'covers', 'issues', 'tags', 'work_tags',
+    'work_tag_state', 'work_links', 'work_durations', 'release_calendar_plans',
+)
+INVENTORY_SETTING_KEYS = ('root_catalog', 'last_scan')
+
+
+def add_cover_schema(db):
+    columns = {row['name'] for row in db.execute('PRAGMA table_info(covers)')}
+    for field, definition in COVER_COLUMNS:
+        if field not in columns:
+            db.execute(f'ALTER TABLE covers ADD COLUMN {field} {definition}')
+    # Preserve the existing automatic image for restoring a later manual edit.
+    db.execute("UPDATE covers SET automatic_path=path,automatic_fingerprint=fingerprint,"
+               "automatic_source_path=source_path WHERE mode='automatic' AND automatic_fingerprint IS NULL")
+
+
+def add_inventory_revision_schema(db):
+    db.execute('CREATE TABLE IF NOT EXISTS inventory_state ('
+               'id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL DEFAULT 0)')
+    db.execute('INSERT OR IGNORE INTO inventory_state(id,revision) VALUES(1,0)')
+    for table in (*INVENTORY_TABLES, 'settings'):
+        columns = [row['name'] for row in db.execute(f'PRAGMA table_info({table})')]
+        changed = ' OR '.join(f'OLD."{column}" IS NOT NEW."{column}"' for column in columns)
+        for operation in ('INSERT', 'UPDATE', 'DELETE'):
+            when = changed if operation == 'UPDATE' else ''
+            if table == 'settings':
+                keys = ','.join(f"'{key}'" for key in INVENTORY_SETTING_KEYS)
+                relevant = (f'NEW.key IN ({keys})' if operation == 'INSERT' else
+                            f'OLD.key IN ({keys})' if operation == 'DELETE' else
+                            f'(OLD.key IN ({keys}) OR NEW.key IN ({keys}))')
+                when = f'({when}) AND {relevant}' if when else relevant
+            condition = f' WHEN {when}' if when else ''
+            db.execute(f'CREATE TRIGGER IF NOT EXISTS inventory_{table}_{operation.lower()} '
+                       f'AFTER {operation} ON {table}{condition} BEGIN '
+                       'UPDATE inventory_state SET revision=revision+1 WHERE id=1; END')
+
+
+def inventory_revision(db) -> int:
+    return db.execute('SELECT revision FROM inventory_state WHERE id=1').fetchone()[0]
 
 
 def add_folder_schema(db):
@@ -254,6 +308,8 @@ class Store:
                 for work in db.execute('SELECT id FROM works').fetchall():
                     require_production_confirmation(db, work['id'])
                 db.execute("INSERT INTO settings(key,value) VALUES('production_confirmation_initialized','true')")
+            add_cover_schema(db)
+            add_inventory_revision_schema(db)
 
     @contextmanager
     def connection(self):

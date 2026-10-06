@@ -208,11 +208,11 @@ class GatewayHandler(BaseHTTPRequestHandler):
         self.connection.settimeout(60)
         body = self.rfile.read(length) if length else None
         upstream = http.client.HTTPConnection("127.0.0.1", self.server.upstream_port, timeout=60)
+        headers_sent = False
         try:
             upstream.request(self.command, self.path, body=body,
                              headers=request_headers(self.headers, self.server.host_key))
             response = upstream.getresponse()
-            payload = response.read()
             folder = response.getheader("X-Workbench-Open-Folder")
             folder_root = response.getheader("X-Workbench-Folder-Root")
             if folder and self.server.host_key and self.command == "POST" and response.status == 200 and re.fullmatch(r"/api/works/\d+/(?:preview/)?open-folder", self.path):
@@ -221,16 +221,27 @@ class GatewayHandler(BaseHTTPRequestHandler):
                 except (OSError, ValueError, subprocess.TimeoutExpired):
                     return self.fail(502, "打开文件夹失败，请检查目录和资源管理器是否可用")
             self.send_response(response.status, response.reason)
+            extra_hop = {part.strip().lower() for part in response.getheader("Connection", "").split(",")}
             for name, value in response.getheaders():
-                if name.lower() not in HOP_HEADERS | {"content-length", "server", "date"}:
+                if name.lower() not in HOP_HEADERS | extra_hop | {"content-length", "server", "date"}:
                     self.send_header(name, value)
-            size = response.getheader("Content-Length", "0") if self.command == "HEAD" else str(len(payload))
-            self.send_header("Content-Length", size)
+            size = response.getheader("Content-Length")
+            if size is not None:
+                self.send_header("Content-Length", size)
+            elif self.command != "HEAD" and response.status not in {204, 304}:
+                # Unknown-length upstream bodies are delimited by this connection.
+                self.send_header("Connection", "close")
+                self.close_connection = True
             self.end_headers()
+            headers_sent = True
             if self.command != "HEAD":
-                self.wfile.write(payload)
+                while chunk := response.read(64 * 1024):
+                    self.wfile.write(chunk)
         except (OSError, http.client.HTTPException):
-            self.fail(502, "WSL 服务暂时不可用，请检查服务运行状态")
+            if headers_sent:
+                self.close_connection = True
+            else:
+                self.fail(502, "WSL 服务暂时不可用，请检查服务运行状态")
         finally:
             upstream.close()
 

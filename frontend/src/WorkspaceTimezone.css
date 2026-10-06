@@ -1,0 +1,15 @@
+.timezone-current { white-space: nowrap; }
+.timezone-dialog { width: min(520px, calc(100vw - 24px)); max-height: calc(100dvh - 32px); padding: 0; border: 1px solid var(--line); border-radius: 16px; color: var(--text); background: var(--surface); box-shadow: var(--shadow); }
+.timezone-dialog[open] { display: flex; flex-direction: column; }
+.timezone-dialog::backdrop { background: #0006; backdrop-filter: blur(3px); }
+.timezone-dialog > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 20px; border-bottom: 1px solid var(--line); }
+.timezone-dialog h2 { font-size: 18px; font-weight: 600; }
+.timezone-dialog header p { font-size: 12px; color: var(--muted); margin-top: 3px; }
+.timezone-dialog-body { overflow: auto; min-height: 0; padding: 16px 20px; }
+.timezone-dialog .search-field { width: 100%; }
+.timezone-options { display: grid; gap: 3px; max-height: 320px; overflow: auto; margin-top: 12px; padding: 2px; }
+.timezone-options button { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 38px; padding: 8px 10px; border: 0; border-radius: 8px; background: transparent; font-size: 12px; text-align: left; }
+.timezone-options button:hover, .timezone-options button[aria-pressed=true] { color: var(--primary); background: var(--soft); }
+.timezone-dialog footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 20px; border-top: 1px solid var(--line); }
+.timezone-dialog footer span { color: var(--muted); font-size: 11px; }
+.language-segment { margin-top: 12px; width: fit-content; }

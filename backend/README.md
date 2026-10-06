@@ -24,6 +24,16 @@ FastAPI 服务由 `backend.main:app` 提供，SQLite 及封面保存在项目 `d
 
 手动扫描任务在 `jobs.inputs` 保存 `enabled_paths` 和 `scan_roots_revision`。相同选定目录的活动任务可合并，目录选择变化后提交新范围任务，已有任务及重启恢复均沿用原快照。升级前无输入的旧手动任务使用当前选项；没有有效启用目录时拒绝提交任务。取消勾选只停止该目录的后续扫描，其作品、人工字段、标签、目录及素材记录、诊断和封面保留。扫描只更新所选目录，封面选源也仅使用任务选定目录；跨根共享作品的当前源生成失败时保留未选根已有可用封面。选择设置不改变主机打开和预览的完整配置根目录权限。
 
+## Inventory snapshots, timezone and source media
+
+`GET /api/works` 保留原筛选、排序和分页参数，新增 `snapshot_id` / `inventory_revision`。后续页携带同一 `snapshot_id` 直接从内存切片，不重新访问 SQLite 或素材目录；条件必须一致。缓存保留最多 16 份，30 分钟后过期，过期或淘汰返回 410。`GET /api/inventory-revision` 用于轻量检查库存版本及 `scan_active`；任务进度不改变库存版本。
+
+`GET/PUT /api/settings/timezone` 管理全设备共用的 IANA 时区，保存使用 `expected_revision`。默认 `Asia/Shanghai`；时间戳按所选时区显示，新平台链接的当天日期按该时区计算，历史发布及计划日期不移动。
+
+本机 `GET/HEAD /api/works/{id}/assets/{asset_id}/media` 支持 Range 播放。封面编辑通过 `GET /api/works/{id}/cover`、`POST .../cover/frames`、`GET .../cover/frames/{frame_id}`、`POST .../cover` 和 `POST .../cover/restore` 完成。截图与裁剪只写封面缓存，输出 16:9、1280×720 JPEG；保存带封面版本检查。手动封面在扫描、强制自动刷新及源失联时保留，恢复自动封面失败也保留当前封面。源视频和封面编辑接口拒绝 LAN 与跨站访问，不接受客户端指定任意文件路径。
+
+`POST /api/works/{id}/open-folder` 可选传入该作品的 `asset_id`，打开素材自身所在子目录；不传则沿用作品目录。Windows 网关按 64KB 分块转发媒体响应，不先读完整视频。
+
 ## Workspace profile
 
 `GET /api/profile` 同时返回姓名、简介、头像及 `es_home` / `patreon_home` 平台主页。`PUT /api/profile` 使用 `expected_revision` 防止覆盖其他客户端的修改；主页只接受安全的 HTTP(S) 地址，可清空。未传主页字段的旧客户端保存个人资料时会保留已有主页。

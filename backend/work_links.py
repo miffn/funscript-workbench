@@ -123,9 +123,9 @@ class WorkLinks:
                     publication[f'{kind}_published'] = True
                 if (field not in dates and changes.get(kind) and changes[kind] != current['links'][kind]
                         and not current[f'{kind}_published']):
-                    dates[field] = release_today()
+                    dates[field] = release_today(self.store)
                 if publication.get(f'{kind}_published') and not current[f'{kind}_published'] and field not in dates:
-                    dates[field] = current[field] or release_today()
+                    dates[field] = current[field] or release_today(self.store)
             row = db.execute('SELECT overrides FROM work_links WHERE work_id=?', (work_id,)).fetchone()
             overrides = json.loads(row['overrides']) if row else {}
             overrides.update(changes)

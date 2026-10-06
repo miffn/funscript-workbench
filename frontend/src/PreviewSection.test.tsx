@@ -8,8 +8,7 @@ import type { Job, PreviewFile, PreviewMatching, PreviewState, Work } from './ap
 const work: Work = { id: 7, script_id: 'S025_001', title: '作品标题', notes: '已有备注', status: 'pending', cover_url: null, video_count: 1, script_count: 1, updated_at: '2026-09-30T12:00:00Z', issues: [], directories: [{ id: 12, path: '/library/S025_001', windows_path: 'D:\\library\\S025_001', available: true }], assets: [{ id: 9, directory_id: 12, name: 'main.mp4', relative_path: 'main.mp4', kind: 'video', size: 1024 }] };
 
 async function openDetailPreviewTools() {
-  fireEvent.click(await screen.findByRole('tab', { name: '素材' }));
-  fireEvent.click(screen.getByText('预览生成与匹配'));
+  fireEvent.click(await screen.findByRole('tab', { name: '预览生成与匹配' }));
 }
 const local = { can_open_folder: true, reason: '' };
 const remote = { can_open_folder: false, reason: '不支持打开，仅素材所在主机可用' };

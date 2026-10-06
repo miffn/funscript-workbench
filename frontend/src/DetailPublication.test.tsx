@@ -34,12 +34,12 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 const page = () => render(<WorkDetail id={7} presentation="page" capabilities={{ can_open_folder: false, reason: '' }} onClose={close} onSaved={saved} notify={() => {}} />);
 const tab = (name: string) => fireEvent.click(screen.getByRole('tab', { name }));
 
-it('uses the approved hero and three real keyboard tabs with only the selected panel visible', async () => {
+it('uses the approved hero and four real keyboard tabs with only the selected panel visible', async () => {
   const view = page();
   await screen.findByRole('heading', { name: '已有标题', level: 1 });
   expect(view.container.querySelector('.detail-header')).toBeNull();
   const tabs = screen.getAllByRole('tab');
-  expect(tabs.map(element => element.textContent)).toEqual(['资料与标签', '素材', '发布信息']);
+  expect(tabs.map(element => element.textContent)).toEqual(['资料与标签', '素材', '预览生成与匹配', '发布信息']);
   expect(screen.getAllByRole('tabpanel')).toHaveLength(1);
   expect(screen.getByRole('tabpanel').getAttribute('aria-labelledby')).toBe('work-detail-tab-tags');
   fireEvent.keyDown(tabs[0], { key: 'ArrowRight' });
@@ -49,17 +49,17 @@ it('uses the approved hero and three real keyboard tabs with only the selected p
   expect(screen.getByRole('heading', { name: '脚本素材' })).toBeTruthy();
   expect(screen.queryByRole('button', { name: '保存信息' })).toBeNull();
   fireEvent.keyDown(tabs[1], { key: 'End' });
-  expect(document.activeElement).toBe(tabs[2]);
+  expect(document.activeElement).toBe(tabs[3]);
   await screen.findByRole('button', { name: '切换 ES 发布状态' });
   expect(screen.getAllByRole('tabpanel')).toHaveLength(1);
-  fireEvent.keyDown(tabs[2], { key: 'Home' });
+  fireEvent.keyDown(tabs[3], { key: 'Home' });
   expect(screen.getByRole('button', { name: '保存信息' })).toBeTruthy();
 });
 
 it('preserves text, source-matching and publication drafts across all tabs and protects leaving', async () => {
   page(); const notes = await screen.findByLabelText('备注');
   fireEvent.change(notes, { target: { value: '本地备注草稿' } });
-  tab('素材'); fireEvent.click(screen.getByRole('button', { name: '修改源匹配草稿' }));
+  tab('预览生成与匹配'); fireEvent.click(screen.getByRole('button', { name: '修改源匹配草稿' }));
   tab('发布信息'); fireEvent.click(await screen.findByRole('button', { name: '编辑 ES 发布日期' }));
   fireEvent.change(screen.getByLabelText('ES 发布日期'), { target: { value: '2026-09-29' } });
   tab('资料与标签');
@@ -131,7 +131,7 @@ it('publishes Patreon independently and retracts ES in a later write without rep
   page(); await screen.findByLabelText('备注');
   fireEvent.change(screen.getByLabelText('标题'), { target: { value: '未保存标题' } });
   fireEvent.change(screen.getByLabelText('备注'), { target: { value: '未保存备注' } });
-  tab('素材'); fireEvent.click(screen.getByRole('button', { name: '修改源匹配草稿' }));
+  tab('预览生成与匹配'); fireEvent.click(screen.getByRole('button', { name: '修改源匹配草稿' }));
   tab('发布信息');
   fireEvent.click(await screen.findByRole('button', { name: '切换 Patreon 发布状态' }));
   fireEvent.click(screen.getByRole('button', { name: '保存链接' }));

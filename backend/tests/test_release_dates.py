@@ -18,7 +18,7 @@ def inventory(tmp_path, monkeypatch):
     app = create_app(config, start_worker=False)
     scanner = Scanner(app.state.store, config)
     scanner.scan()
-    monkeypatch.setattr(work_links, 'release_today', lambda: '2026-10-01')
+    monkeypatch.setattr(work_links, 'release_today', lambda store=None: '2026-10-01')
     with TestClient(app) as client:
         work = client.get('/api/works').json()['items'][0]
         yield config, app, scanner, client, f'/api/works/{work["id"]}'

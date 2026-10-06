@@ -6,13 +6,13 @@ import { useI18n, translate } from './i18n';
 import { ApiError, errorMessage, request } from './api';
 import type { CalendarData, CalendarEvent, CalendarMode, CalendarResult, CalendarWork, PublicationPlatform } from './api';
 import './ReleaseCalendar.css';
+import { useWorkspaceTimezone, workspaceToday } from './WorkspaceTimezone';
 
 type DragItem = { kind: 'work'; id: number } | { kind: 'event'; key: string };
 const PLATFORM_LABEL = { es: 'ES', patreon: 'Patreon' };
 const WEEKDAYS = ['一', '二', '三', '四', '五', '六', '日'];
 export function beijingToday() {
-  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
-  return ['year', 'month', 'day'].map(type => parts.find(part => part.type === type)!.value).join('-');
+  return workspaceToday();
 }
 function isoDate(date: Date) { return date.toISOString().slice(0, 10); }
 function monthDate(month: string) { return new Date(`${month}-01T00:00:00Z`); }
@@ -42,7 +42,9 @@ export function groupCalendarEvents(events: CalendarEvent[]) {
 
 export function ReleaseCalendar({ revision = 0, onSelect, onChanged }: { revision?: number; onSelect: (id: number) => void; onChanged: () => void }) {
   const { locale, t } = useI18n();
+  const { timezone } = useWorkspaceTimezone();
   const [initialToday] = useState(beijingToday);
+  const previousToday = useRef(initialToday);
   const [month, setMonth] = useState(initialToday.slice(0, 7));
   const [selectedDate, setSelectedDate] = useState(initialToday);
   const [data, setData] = useState<CalendarData | null>(null);
@@ -91,7 +93,12 @@ export function ReleaseCalendar({ revision = 0, onSelect, onChanged }: { revisio
     .map(platform => ({ work, platform })));
   const selectedPlatforms: PublicationPlatform[] = platforms === 'both' ? ['es', 'patreon'] : [platforms];
   const disabled = busy || loading || !!loadError || !data || data.month !== month;
-  const today = data?.today || initialToday;
+  const today = workspaceToday(timezone);
+  useEffect(() => {
+    const previous = previousToday.current;
+    if (previous !== today && selectedDate === previous) { setSelectedDate(today); if (month === previous.slice(0, 7)) setMonth(today.slice(0, 7)); }
+    previousToday.current = today;
+  }, [today, selectedDate, month]);
 
   function selectDay(date: string) { setSelectedDate(date); setSelectedEventKey(null); }
   function selectEvent(event: CalendarEvent) { setSelectedDate(event.date); setSelectedEventKey(event.key); setSelectedEventRevision(event.revision); setEditDate(event.date); }

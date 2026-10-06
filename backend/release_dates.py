@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime
 import re
 from zoneinfo import ZoneInfo
+from .timezone import workspace_timezone
 
 
 RELEASE_DATE_FIELDS = ('es_published_date', 'patreon_published_date')
@@ -20,5 +21,5 @@ def validate_release_date(value: object) -> str | None:
     return value
 
 
-def release_today() -> str:
-    return datetime.now(ZoneInfo('Asia/Shanghai')).date().isoformat()
+def release_today(store=None) -> str:
+    return datetime.now(ZoneInfo(workspace_timezone(store))).date().isoformat()

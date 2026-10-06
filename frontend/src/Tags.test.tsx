@@ -159,18 +159,38 @@ describe('direct tag transfers', () => {
     expect(JSON.parse(writes.at(-1)![1].body)).toEqual({ tag_ids: [1], expected_revision: 8 });
   });
 
-  it('bounds a large library to pages and keeps selected labels visible during search', async () => {
+  it('shows all editable categories without paging and keeps category/search filters independent of selected labels', async () => {
     catalog.push(...Array.from({ length: 50 }, (_, index) => makeTag(100 + index, 'author', `新增作者 ${index}`)));
+    catalog.push(makeTag(160, 'axis_type', '单轴'), makeTag(161, 'axis_type', '多轴'), makeTag(162, 'duration', '18 分钟'));
     binding.tags = [catalog[0]];
     render(<WorkTagEditor work={work} onClose={vi.fn()} onSaved={vi.fn()} />);
     const library = await screen.findByRole('region', { name: '标签库' });
     const countOptions = () => within(library).getAllByRole('button').filter(button => button.classList.contains('tag-option')).length;
-    expect(countOptions()).toBe(18);
-    fireEvent.click(screen.getByRole('button', { name: '标签库下一页' }));
-    expect(countOptions()).toBe(18);
+    expect(countOptions()).toBe(catalog.filter(tag => tag.category !== 'duration' && tag.id !== 1).length);
+    for (const category of ['作者', '视频类型', '轴类型', '发布类型', '档位', '自定义分类']) {
+      expect(within(library).getByRole('heading', { name: category })).toBeTruthy();
+    }
+    expect(within(library).getByRole('button', { name: '新增作者 49' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '标签库下一页' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '标签库上一页' })).toBeNull();
+    expect(within(library).queryByRole('button', { name: '18 分钟' })).toBeNull();
+    const categories = within(library).getByRole('navigation', { name: '标签类别' });
+    expect(within(categories).queryByRole('button', { name: '时间' })).toBeNull();
+    fireEvent.click(within(categories).getByRole('button', { name: '作者' }));
+    expect(countOptions()).toBe(51);
     fireEvent.change(screen.getByLabelText('搜索作者或标签'), { target: { value: '新增作者 49' } });
     expect(countOptions()).toBe(1);
     expect(within(screen.getByRole('region', { name: '当前标签' })).getByRole('button', { name: '作者 A' })).toBeTruthy();
+    fireEvent.click(within(categories).getByRole('button', { name: '视频类型' }));
+    expect(within(library).queryByRole('button', { name: '新增作者 49' })).toBeNull();
+    expect(within(library).getByText('没有匹配的标签')).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('搜索作者或标签'), { target: { value: '' } });
+    expect(countOptions()).toBe(2);
+    expect(within(library).getByRole('button', { name: 'Real' })).toBeTruthy();
+    expect(within(library).getByRole('button', { name: 'Anime' })).toBeTruthy();
+    expect(within(screen.getByRole('region', { name: '当前标签' })).getByRole('button', { name: '作者 A' })).toBeTruthy();
+    fireEvent.click(within(categories).getByRole('button', { name: '全部类别' }));
+    expect(countOptions()).toBe(61);
   });
 
   it('keeps automatic duration bindings out of manual transfer requests', async () => {

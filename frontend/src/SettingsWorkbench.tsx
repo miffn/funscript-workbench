@@ -8,6 +8,7 @@ import type { Capabilities } from './api';
 import type { Theme, InventoryView } from './Preferences';
 import { storedChoice } from './Preferences';
 import { translate as t } from './i18n';
+import { WorkspaceTimezoneSettings } from './WorkspaceTimezone';
 
 const sections = [
   ['library', '本地资料库', Folder], ['processing', '扫描与处理', RefreshCw],
@@ -31,7 +32,7 @@ export function SettingsWorkbench({ capabilities, revision, theme, onTheme, view
       <header className="settings-section-title"><h2>{t(activeSection[1])}</h2>{section === 'processing' && onScan && <button className="text-action" onClick={onScan} disabled={scanning}><RefreshCw size={15} />{t(scanning ? '正在扫描' : '立即扫描')}</button>}</header>
       <div hidden={!['library', 'processing', 'integrations'].includes(section)}><SettingsPage capabilities={capabilities} revision={revision} section={['library', 'processing', 'integrations'].includes(section) ? section as 'library' | 'processing' | 'integrations' : 'library'} /></div>
       <div hidden={section !== 'publishing'}>
-        <section className="settings-card"><div className="section-heading"><h3>{t('发布偏好')}</h3></div><div className="preference-row"><div><strong>{t('默认发布日期')}</strong><p>{t('库存按对应平台的实际发布日期排序，未填写日期置后。')}</p></div><div className="view-switch">{(['es', 'patreon'] as const).map(platform => <button key={platform} className="button small" aria-pressed={sortPlatform === platform} onClick={() => onSortPlatform(platform)}>{platform === 'es' ? 'ES' : 'Patreon'}</button>)}</div></div><div className="preference-row"><strong>{t('排序方向')}</strong><div className="view-switch">{(['desc', 'asc'] as const).map(direction => <button key={direction} className="button small" aria-pressed={sortDirection === direction} onClick={() => onSortDirection(direction)}>{t(direction === 'desc' ? '从新到旧' : '从旧到新')}</button>)}</div></div><div className="preference-row"><div><strong>{t('链接保存')}</strong><p>{t('新增 ES 或 Patreon 帖子链接时，记录该平台已发布及当天日期；计划日期单独维护。')}</p></div></div><div className="preference-row"><strong>{t('日期时区')}</strong><span className="settings-row-value">Asia/Shanghai</span></div></section>
+        <section className="settings-card"><div className="section-heading"><h3>{t('发布偏好')}</h3></div><div className="preference-row"><div><strong>{t('默认发布日期')}</strong><p>{t('库存按对应平台的实际发布日期排序，未填写日期置后。')}</p></div><div className="view-switch">{(['es', 'patreon'] as const).map(platform => <button key={platform} className="button small" aria-pressed={sortPlatform === platform} onClick={() => onSortPlatform(platform)}>{platform === 'es' ? 'ES' : 'Patreon'}</button>)}</div></div><div className="preference-row"><strong>{t('排序方向')}</strong><div className="view-switch">{(['desc', 'asc'] as const).map(direction => <button key={direction} className="button small" aria-pressed={sortDirection === direction} onClick={() => onSortDirection(direction)}>{t(direction === 'desc' ? '从新到旧' : '从旧到新')}</button>)}</div></div><div className="preference-row"><div><strong>{t('链接保存')}</strong><p>{t('新增 ES 或 Patreon 帖子链接时，记录该平台已发布及当天日期；计划日期单独维护。')}</p></div></div><WorkspaceTimezoneSettings /></section>
         {SHOW_ES_POSTS && <EsTemplateSettings />}
       </div>
       <div hidden={section !== 'appearance'}>

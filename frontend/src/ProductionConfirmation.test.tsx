@@ -128,7 +128,7 @@ describe('manual production completion', () => {
     expect(screen.queryByRole('heading', { name: '制作确认' })).toBeNull();
     fireEvent.change(screen.getByLabelText('备注'), { target: { value: '仍在编辑' } });
     server = { ...server, script_count: 0, production_required: true, production_confirmed_at: null, production_revision: 5 };
-    fireEvent.click(screen.getByRole('tab', { name: '素材' }));
+    fireEvent.click(screen.getByRole('tab', { name: '预览生成与匹配' }));
     fireEvent.click(screen.getByRole('button', { name: '测试刷新素材' }));
     fireEvent.click(screen.getByRole('tab', { name: '资料与标签' }));
     await screen.findByRole('heading', { name: '制作确认' });
@@ -140,7 +140,7 @@ describe('manual production completion', () => {
   it('blocks confirmation while script assignments have unsaved edits', async () => {
     detail(); await screen.findByLabelText('备注');
     await waitFor(() => expect(confirmButton().disabled).toBe(false));
-    fireEvent.click(screen.getByRole('tab', { name: '素材' }));
+    fireEvent.click(screen.getByRole('tab', { name: '预览生成与匹配' }));
     fireEvent.click(screen.getByRole('button', { name: '测试修改对应关系' }));
     fireEvent.click(screen.getByRole('tab', { name: '资料与标签' }));
     expect(confirmButton().disabled).toBe(true);

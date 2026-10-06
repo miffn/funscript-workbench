@@ -5,6 +5,7 @@ import { ApiError, errorMessage, request, safeLink, workIdentity } from './api';
 import type { Work, WorkLinkKind, WorkLinks, WorkLinkValues } from './api';
 import { useI18n, translate } from './i18n';
 import './ReleaseWorkbench.css';
+import { useWorkspaceTimezone } from './WorkspaceTimezone';
 
 export const linkTypes = [
   { kind: 'patreon', label: 'Patreon 文章链接', short: 'Patreon', Icon: CircleDollarSign },
@@ -48,6 +49,7 @@ function ReleaseEditor({ work, initialKind, onClose, onSaved, onDirtyChange, onB
 }) {
   useI18n();
   const instance = useId();
+  const { timezone } = useWorkspaceTimezone();
   const identity = workIdentity(work), subtitle = work.title?.trim();
   const dialog = useRef<HTMLDialogElement>(null);
   const content = useRef<HTMLDivElement>(null);
@@ -191,7 +193,7 @@ function ReleaseEditor({ work, initialKind, onClose, onSaved, onDirtyChange, onB
           <div className="release-date-pair">{dateRow(platform, true)}{dateRow(platform, false)}</div>{linkRow(platform)}
         </section>;
       })}<section className="release-download-panel"><header className="release-surface-head"><h3>{translate('下载与播放链接')}</h3></header>{linkRow('video')}{linkRow('script')}</section></div>
-      <footer className="release-save-bar"><span className="release-save-hint">{dirty ? translate('修改尚未保存') : translate('已保存的发布信息')} · {translate('日期使用北京时间')}</span><div><button type="button" className="button" disabled={saving || !dirty} onClick={modal ? close : reset}>{translate(modal ? '取消' : '重置修改')}</button><button type="submit" className="button primary" disabled={loading || saving || !dirty || conflict}>{saving ? <LoaderCircle className="spin" size={16} /> : <Check size={16} />}{saving ? translate('正在保存') : translate('保存链接')}</button></div></footer>
+      <footer className="release-save-bar"><span className="release-save-hint">{dirty ? translate('修改尚未保存') : translate('已保存的发布信息')} · {timezone}</span><div><button type="button" className="button" disabled={saving || !dirty} onClick={modal ? close : reset}>{translate(modal ? '取消' : '重置修改')}</button><button type="submit" className="button primary" disabled={loading || saving || !dirty || conflict}>{saving ? <LoaderCircle className="spin" size={16} /> : <Check size={16} />}{saving ? translate('正在保存') : translate('保存链接')}</button></div></footer>
     </form>}
   </div>;
   return modal ? <dialog ref={dialog} className="tag-dialog work-links-dialog" aria-labelledby={`${instance}-title`} onCancel={event => { event.preventDefault(); close(); }}>

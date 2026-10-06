@@ -17,13 +17,16 @@ from .config import Config
 from .jobs import JobWorker
 from .scanner import enrich_metadata
 from .previews import MEDIA_FILES, PreviewError
-from .store import Store, now
+from .store import Store, now, inventory_revision
+from .inventory_cache import InventoryCache, InventoryCacheError
 from .tags import TagService, TagError
 from .durations import duration_fields
 from .scan_roots import ScanRoots, ScanRootsError
 from .work_links import WorkLinks, WorkLinksError, PUBLICATION_FIELDS
 from .release_dates import RELEASE_DATE_FIELDS, validate_release_date, release_today
 from .profile import register_profile_routes
+from .timezone import register_timezone_routes
+from .work_media import register_media_routes
 from .language import register_language_routes
 from .es_posts import register_es_post_routes
 from .release_calendar import register_release_calendar_routes
@@ -58,6 +61,7 @@ def work_data_revision(work) -> str:
 class OpenFolder(BaseModel):
     model_config = ConfigDict(extra="forbid")
     directory_id: int | None = None
+    asset_id: Annotated[StrictInt, Field(gt=0)] | None = None
 
 
 class ProductionConfirmation(BaseModel):
@@ -172,6 +176,7 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
     with store.connection() as db:
         scan_roots.state(db)
     links = WorkLinks(store)
+    inventory_cache = InventoryCache()
 
     @asynccontextmanager
     async def lifespan(app):
@@ -189,7 +194,9 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
     app.state.worker = worker
     app.state.config = config
     app.state.tags = tags
+    app.state.inventory_cache = inventory_cache
     register_profile_routes(app, store)
+    register_timezone_routes(app, store)
     register_language_routes(app, store)
     register_es_post_routes(app, store, config, worker.previews)
     register_release_calendar_routes(app, store)
@@ -252,6 +259,8 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
         record["script_count"] = sum(asset["kind"] == "script" and asset["directory_id"] in counted_ids for asset in assets)
         record["issues"] = [{"type": row["type"], "message": row["message"]} for row in db.execute("SELECT type,message FROM issues WHERE work_id=? ORDER BY id", (record["id"],))]
         cover = db.execute("SELECT * FROM covers WHERE work_id=?", (record["id"],)).fetchone()
+        record['cover_mode'] = cover['mode'] if cover else 'automatic'
+        record['cover_revision'] = cover['revision'] if cover else 0
         record["cover_url"] = f"/api/covers/{record['id']}?v={cover['fingerprint'][:20]}" if cover and cover["path"] and (not check_filesystem or Path(cover["path"]).is_file()) else None
         if include_assets:
             record["assets"] = assets
@@ -283,6 +292,7 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
 
     mcp_auth = MCPAuth(store)
     register_mcp_auth_routes(app, mcp_auth, host_capability)
+    app.state.media = register_media_routes(app, store, config, host_capability, require_host_origin)
 
     def send_open_request(windows_path: str, windows_root: str):
         encoded = base64.urlsafe_b64encode(windows_path.encode("utf-8")).decode("ascii")
@@ -344,7 +354,8 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
               tag_id: int | None = Query(default=None, gt=0), untagged_only: str = Query(default="false", pattern="^(true|false)$"),
               tag_ids: str = Query(default="", max_length=1200),
               sort_platform: Literal['es', 'patreon'] = 'es', sort_direction: Literal['asc', 'desc'] = 'desc',
-              page: int = Query(default=1, ge=1), page_size: int = Query(default=24, ge=1, le=100)):
+              page: int = Query(default=1, ge=1), page_size: int = Query(default=24, ge=1, le=100),
+              snapshot_id: str | None = Query(default=None, max_length=100)):
         status_filters = {'pending': '(es_published=0 OR patreon_published=0)',
                           'published': '(es_published=1 AND patreon_published=1)',
                           'es_published': 'es_published=1', 'patreon_published': 'patreon_published=1'}
@@ -372,7 +383,15 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
             if selected_tags:
                 raise HTTPException(422, "按标签筛选不能同时只看无标签库存")
             clauses.append("NOT EXISTS(SELECT 1 FROM work_tags wt JOIN tags t ON t.id=wt.tag_id WHERE wt.work_id=works.id AND t.category!='duration' AND (t.category!='axis_type' OR wt.source!='scan'))")
-        with store.connection() as db:
+        query_key = (q.strip(), status, issues_only, tuple(sorted(selected_tags)),
+                     untagged_only == 'true', sort_platform, sort_direction)
+        if snapshot_id is not None:
+            try:
+                return inventory_cache.get(snapshot_id, query_key).page(page, page_size)
+            except InventoryCacheError as error:
+                raise HTTPException(error.status_code, str(error))
+
+        def build(db):
             if selected_tags:
                 selected = sorted(selected_tags)
                 catalog = db.execute(f"SELECT id,category FROM tags WHERE id IN ({','.join('?' for _ in selected)})", selected).fetchall()
@@ -390,10 +409,9 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
                 clauses.append(f"id IN ({','.join('?' for _ in ids)})" if ids else '0')
                 values.extend(ids)
             where = " WHERE " + " AND ".join(clauses) if clauses else ""
-            total = db.execute("SELECT count(*) FROM works" + where, values).fetchone()[0]
             date_field = f'{sort_platform}_published_date'
-            order = f' ORDER BY ({date_field} IS NULL OR {date_field}=\'\') ASC,{date_field} {sort_direction.upper()},script_id DESC,id DESC LIMIT ? OFFSET ?'
-            rows = db.execute("SELECT * FROM works" + where + order, [*values, page_size, (page - 1) * page_size]).fetchall()
+            order = f' ORDER BY ({date_field} IS NULL OR {date_field}=\'\') ASC,{date_field} {sort_direction.upper()},script_id DESC,id DESC'
+            rows = db.execute("SELECT * FROM works" + where + order, values).fetchall()
             stats = {"total": db.execute("SELECT count(*) FROM works").fetchone()[0],
                      "pending": sum(row['id'] in ready_ids for row in db.execute("SELECT id FROM works WHERE es_published=0 OR patreon_published=0")),
                      "to_make": len(to_make_ids),
@@ -401,8 +419,22 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
                      "es_published": db.execute("SELECT count(*) FROM works WHERE es_published=1").fetchone()[0],
                      "patreon_published": db.execute("SELECT count(*) FROM works WHERE patreon_published=1").fetchone()[0],
                      "issues": db.execute("SELECT count(DISTINCT work_id) FROM issues WHERE work_id IS NOT NULL").fetchone()[0]}
-            return {"items": [details(db, row, check_filesystem=False) for row in rows], "total": total, "page": page,
-                    "page_size": page_size, "stats": stats, "last_scan": last_scan(db)}
+            return {"items": [details(db, row, check_filesystem=False) for row in rows],
+                    "stats": stats, "last_scan": last_scan(db)}
+
+        with store.connection() as db:
+            db.execute('BEGIN')
+            revision = inventory_revision(db)
+            return inventory_cache.get_or_create(query_key, revision, lambda: build(db)).page(page, page_size)
+
+    @app.get('/api/inventory-revision')
+    def current_inventory_revision():
+        with store.connection() as db:
+            db.execute('BEGIN')
+            revision = inventory_revision(db)
+            scan_active = db.execute("SELECT 1 FROM jobs WHERE type='scan' "
+                                     "AND status IN ('queued','pending','running') LIMIT 1").fetchone() is not None
+            return {'inventory_revision': revision, 'scan_active': scan_active}
 
     @app.get("/api/works/{work_id}")
     def work_detail(work_id: int):
@@ -533,7 +565,7 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
                 for platform in ('es', 'patreon'):
                     date_field = f'{platform}_published_date'
                     if changes.get(f'{platform}_published') is True and not current[f'{platform}_published'] and not current[date_field] and date_field not in changes:
-                        changes[date_field] = release_today()
+                        changes[date_field] = release_today(store)
                 manual_fields = set(json.loads(current["manual_fields"])) | set(changes)
                 if {'es_published', 'patreon_published'} & changes.keys():
                     es = changes.get('es_published', bool(current['es_published']))
@@ -598,7 +630,7 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
     @app.get("/api/capabilities")
     def capabilities(request: Request):
         supported = host_capability(request)
-        return {"can_open_folder": supported,
+        return {"can_open_folder": supported, "can_play_video": supported, "can_edit_cover": supported,
                 "reason": "在素材主机资源管理器中打开" if supported else "不支持打开，仅素材所在主机可用"}
 
     @app.post("/api/works/{work_id}/open-folder")
@@ -612,6 +644,21 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
             if directory is None or (options and options.directory_id is not None and options.directory_id != directory['id']):
                 raise HTTPException(404, "目录不存在或当前不可访问")
             windows_path, windows_root = validated_directory(dict(directory), db)
+            if options and options.asset_id is not None:
+                asset = db.execute('SELECT * FROM assets WHERE id=? AND directory_id=?', (options.asset_id, directory['id'])).fetchone()
+                if asset is None:
+                    raise HTTPException(404, '素材不属于当前作品目录')
+                candidate = Path(directory['path']) / asset['relative_path']
+                try:
+                    from .scan_roots import no_link_components
+                    no_link_components(candidate)
+                    candidate.resolve().relative_to(Path(directory['path']).resolve())
+                    if not candidate.is_file():
+                        raise HTTPException(404, '素材当前不可访问')
+                    root = next(root for root in scan_roots.roots(db) if str(root.path) == directory['root_path'])
+                    windows_path = root.windows_directory(candidate.parent)
+                except (ValueError, OSError, ScanRootsError, StopIteration):
+                    raise HTTPException(403, '素材路径不在当前安全目录中') from None
         return send_open_request(windows_path, windows_root)
 
     @app.get("/api/works/{work_id}/preview")

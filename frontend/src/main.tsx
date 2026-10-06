@@ -5,4 +5,5 @@ import { LanguageBootstrap } from './LanguageSettings';
 import './styles.css';
 import './Workbench.css';
 import './SecondaryPages.css';
+import './MediaWorkbench.css';
 createRoot(document.getElementById('root')!).render(<StrictMode><LanguageBootstrap /><App /></StrictMode>);

@@ -4,6 +4,7 @@ import { errorMessage, request } from './api';
 import { getLanguage, setLanguage, useI18n } from './i18n';
 import type { Language, LanguageState } from './i18n';
 import { SettingsSection } from './SettingsSection';
+import './WorkspaceTimezone.css';
 
 export function LanguageBootstrap() {
   const { locale } = useI18n();
@@ -49,10 +50,7 @@ export function LanguageSettings({ collapsible = false }: { collapsible?: boolea
   };
   return <SettingsSection className="language-settings" headingId="language-settings-title" title={t('界面语言')} icon={<Languages size={20} aria-hidden="true" />} collapsible={collapsible}>
     <p className="help-text">{t('语言设置保存在数据库中，所有设备共用；作品标题、作者、标签和文件名保持原样。')}</p>
-    <label htmlFor="interface-language">{t('显示语言')}</label>
-    <select id="interface-language" value={locale} disabled={busy} onChange={event => void change(event.target.value as Language)}>
-      <option value="zh-CN">简体中文</option><option value="en">English</option>
-    </select>
+    <div className="view-switch language-segment" role="group" aria-label={t('显示语言')}>{([['zh-CN', '简体中文'], ['en', 'English']] as const).map(([language, label]) => <button type="button" className="button small" key={language} aria-pressed={locale === language} disabled={busy} onClick={() => void change(language)}>{label}</button>)}</div>
     {busy && <p className="help-text" role="status"><LoaderCircle size={16} className="spin" />{t('正在保存语言设置…')}</p>}
     {saved && <p className="help-text" role="status">{t('界面语言已保存')}</p>}
     {error && <p className="inline-error" role="alert">{t(error)}</p>}

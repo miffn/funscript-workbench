@@ -2,7 +2,7 @@ import { workIdentity } from './api';
 import { translate as t, useI18n, getLanguage } from './i18n';
 import { useEffect, useImperativeHandle, useRef, useState } from 'react';
 import type { FormEvent, KeyboardEvent, ReactNode, Ref } from 'react';
-import { Archive, ArrowLeft, ArrowRight, Check, CheckCheck, CircleAlert, ChevronDown, Search, ChevronRight, Tags, Send, Files, FileText, Film, Folder, FolderOpen, Image, LoaderCircle, RefreshCw, X } from 'lucide-react';
+import { Archive, ArrowLeft, ArrowRight, Camera, Check, CheckCheck, CircleAlert, ChevronDown, Search, ChevronRight, Tags, Send, Files, FileText, Film, Folder, FolderOpen, Image, LoaderCircle, RefreshCw, X } from 'lucide-react';
 import { displayValue, errorMessage, formatDate, formatSize, historyEntries, isActiveJob, isPublished, jobLabel, request, safeLink } from './api';
 import type { Asset, Capabilities, Issue, Job, PreviewState, Settings, Work, WorkLinks } from './api';
 import type { Notice } from './App';
@@ -16,6 +16,9 @@ import { SettingsSection } from './SettingsSection';
 import { ScanCandidates } from './ScanCandidates';
 import { WorkReleasePanel } from './WorkLinks';
 import './DetailPanels.css';
+import { SourceVideo } from './SourceVideo';
+import { CoverEditor } from './CoverEditor';
+import type { CoverEditorHandle } from './CoverEditor';
 
 export function StatusBadge({ status }: { status: 'pending' | 'published' }) {
   useI18n(); return <span className={`badge ${status}`}><span className="status-dot" />{status === 'published' ? t("已发布") : t("待发布")}</span>; }
@@ -160,8 +163,10 @@ export function WorkDetail({ id, capabilities, onClose, onSaved, notify, present
   const [changingStatus, setChangingStatus] = useState(false);
   const [opening, setOpening] = useState(false);
   const [directoryId, setDirectoryId] = useState<number | null>(null);
-  const [tab, setTab] = useState<'tags' | 'assets' | 'release'>('tags');
-  const [visitedTabs, setVisitedTabs] = useState({ assets: false, release: false });
+  const [tab, setTab] = useState<'tags' | 'assets' | 'generation' | 'release'>('tags');
+  const [visitedTabs, setVisitedTabs] = useState({ assets: false, generation: false, release: false });
+  const [editingCover, setEditingCover] = useState(false);
+  const coverEditor = useRef<CoverEditorHandle>(null);
   const [releaseDirty, setReleaseDirty] = useState(false);
   const [editingTags, setEditingTags] = useState(false);
   const [editingPost, setEditingPost] = useState(false);
@@ -196,11 +201,12 @@ export function WorkDetail({ id, capabilities, onClose, onSaved, notify, present
     };
   }, [presentation, locale, loading, error, work?.script_id, work?.title]);
   const leaveBlocked = saving || changingStatus || opening || confirmingProduction || resettingProduction || editingTags || editingPost || refreshingPublication;
-  const requestLeave = (next: () => void) => {
+  const leaveWithOtherDrafts = (next: () => void) => {
     if (leaveBlocked) return;
     if (dirty || matchingDirty || releaseDirty) { pendingLeave.current = next; setConfirmClose(true); return; }
     pendingLeave.current = null; next();
   };
+  const requestLeave = (next: () => void) => { if (editingCover && coverEditor.current) coverEditor.current.requestLeave(() => { setEditingCover(false); leaveWithOtherDrafts(next); }); else leaveWithOtherDrafts(next); };
   useImperativeHandle(ref, () => ({ requestLeave }));
   const close = () => requestLeave(onClose);
   const discard = () => {
@@ -271,10 +277,10 @@ export function WorkDetail({ id, capabilities, onClose, onSaved, notify, present
     catch (error) { setSaveError(t("修改未保存：{0}", {"0": errorMessage(error)})); }
     finally { setSaving(false); }
   };
-  const open = async () => {
+  const open = async (assetId?: number) => {
     if (!work || !capabilities.can_open_folder || !directoryId) return;
     setOpening(true); setSaveError('');
-    try { const result = await request<{ message: string }>(`/api/works/${id}/open-folder`, { method: 'POST', body: JSON.stringify({ directory_id: directoryId }) }); notify({ kind: 'success', message: result.message }); }
+    try { const result = await request<{ message: string }>(`/api/works/${id}/open-folder`, { method: 'POST', body: JSON.stringify({ directory_id: directoryId, ...(assetId ? { asset_id: assetId } : {}) }) }); notify({ kind: 'success', message: result.message }); }
     catch (error) { setSaveError(t("无法打开文件夹：{0}", {"0": errorMessage(error)})); }
     finally { setOpening(false); }
   };
@@ -305,7 +311,7 @@ export function WorkDetail({ id, capabilities, onClose, onSaved, notify, present
   const pathJoin = (directory: string, name: string) => { if (!directory) return name; const separator = directory.includes('\\') ? '\\' : '/'; return directory.replace(/[\\/]+$/, '') + separator + name.replace(/^[\\/]+/, '').replace(/[\\/]/g, separator); };
   const filePath = selectedPreview ? pathJoin(previewData?.windows_path || previewData?.output_dir || '', selectedPreview.filename) : selectedSource ? sourceDirectory ? pathJoin(sourceDirectory.windows_path || sourceDirectory.path, selectedSource.relative_path) : selectedSource.relative_path : '';
   const previewOrdinal = selectedPreview ? Math.max(1, [...new Set(previewFiles.filter(file => file.kind !== 'heatmap').map(file => file.clip_index))].sort((a, b) => a - b).indexOf(selectedPreview.clip_index) + 1) : 1;
-  const tabs = [{ key: 'tags', label: '资料与标签', Icon: Tags }, { key: 'assets', label: '素材', Icon: Files }, { key: 'release', label: '发布信息', Icon: Send }] as const;
+  const tabs = [{ key: 'tags', label: '资料与标签', Icon: Tags }, { key: 'assets', label: '素材', Icon: Files }, { key: 'generation', label: '预览生成与匹配', Icon: Film }, { key: 'release', label: '发布信息', Icon: Send }] as const;
   const switchTab = (value: typeof tab) => {
     if (saving || changingStatus || confirmingProduction || resettingProduction || refreshingPublication) return;
     setTab(value);
@@ -348,7 +354,7 @@ export function WorkDetail({ id, capabilities, onClose, onSaved, notify, present
     </div>
     {confirmClose && <div className="discard-confirm" role="alert"><strong>{t("有尚未保存的修改")}</strong><p>{t(presentation === 'page' ? '离开后将放弃尚未保存的标题、备注、发布日期或脚本对应关系。' : "关闭后将放弃尚未保存的标题、备注、发布日期或脚本对应关系。")}</p><div><button className="button small" ref={continueEditing} onClick={() => { pendingLeave.current = null; setConfirmClose(false); closeButton.current?.focus(); }}>{t("继续编辑")}</button><button className="button small" onClick={discard} disabled={leaveBlocked}>{t(presentation === 'page' ? '放弃更改并离开' : "放弃更改并关闭")}</button></div></div>}
     {loading ? <Loading label={t("正在读取作品详情")} /> : error ? <ResourceError message={error} retry={() => setRetry(value => value + 1)} /> : work && <>
-      <div className="work-detail-hero"><Cover work={work} large /><div className="work-detail-hero-content">
+      <div className="work-detail-hero"><button className="cover-open" type="button" aria-label={t('更换作品封面')} disabled={!(capabilities.can_edit_cover ?? capabilities.can_open_folder) || !assets.some(asset => asset.kind === 'video')} onClick={() => setEditingCover(true)}><Cover work={work} large /><span className="cover-open-hint"><Camera size={15} />{t('更换封面')}</span></button><div className="work-detail-hero-content">
         <span className="detail-identity">{work.script_id ? work.script_id + ' · ' : ''}{t('作品详情')}</span>
         {presentation === 'page' ? <h1 id="detail-title" ref={heading} tabIndex={-1}>{work.title.trim() || workIdentity(work)}</h1> : <h2 id="detail-title" ref={heading} tabIndex={-1}>{work.title.trim() || workIdentity(work)}</h2>}
         <TagChips tags={work.tags?.filter(tag => tag.category !== 'duration')} durationStatus={work.duration_status} durationError={work.duration_error} />
@@ -407,13 +413,19 @@ export function WorkDetail({ id, capabilities, onClose, onSaved, notify, present
           </div><section className="detail-surface detail-file-inspector" aria-label={t('素材详情')}><header className="detail-surface-head"><h3>{t('素材详情')}</h3><span>{t(fileKind === 'preview' ? '预览素材' : fileKind === 'video' ? '视频素材' : fileKind === 'script' ? '脚本素材' : '辅助素材')}</span></header>
             {fileName ? <>
               <div className="detail-surface-content">
-                {selectedPreview ? <InlinePreview key={selectedPreview.filename} file={selectedPreview} ordinal={previewOrdinal} onClose={() => setSelectedFile(defaultSource ? { type: 'source', id: defaultSource.id } : null)} /> : fileKind === 'video' ? <><Cover work={work} large /><p className="detail-cover-caption">{t('作品封面')}</p></> : <div className="detail-file-symbol"><FileText size={40} strokeWidth={1.3} aria-hidden="true" /><strong>{fileFormat}</strong></div>}
+                {selectedPreview ? <InlinePreview key={selectedPreview.filename} file={selectedPreview} ordinal={previewOrdinal} onClose={() => setSelectedFile(defaultSource ? { type: 'source', id: defaultSource.id } : null)} /> : fileKind === 'video' && selectedSource ? <SourceVideo key={selectedSource.id} workId={id} assetId={selectedSource.id} supported={!!(capabilities.can_play_video ?? capabilities.can_open_folder)} onOpenFolder={() => void open(selectedSource.id)} /> : <div className="detail-file-symbol"><FileText size={40} strokeWidth={1.3} aria-hidden="true" /><strong>{fileFormat}</strong></div>}
                 <strong className="detail-selected-name">{fileName}</strong>
               </div>
-              <dl className="detail-file-facts"><div><dt>{t('类型')}</dt><dd>{fileFormat}</dd></div><div><dt>{t('文件大小')}</dt><dd>{formatSize(selectedPreview?.size ?? selectedSource?.size ?? 0)}</dd></div>{selectedSource?.axis && <div><dt>{t('对应轴')}</dt><dd>{selectedSource.axis}</dd></div>}{selectedPreview && <div><dt>{t('分辨率')}</dt><dd>{selectedPreview.width} × {selectedPreview.height}</dd></div>}<div><dt>{t('关联作品')}</dt><dd>{workIdentity(work)}</dd></div><div><dt>{t('本地路径')}</dt><dd><code>{filePath}</code></dd></div></dl>
+              <dl className="detail-file-facts"><div><dt>{t('类型')}</dt><dd>{fileFormat}</dd></div><div><dt>{t('文件大小')}</dt><dd>{formatSize(selectedPreview?.size ?? selectedSource?.size ?? 0)}</dd></div>{selectedSource?.axis && <div><dt>{t('对应轴')}</dt><dd>{selectedSource.axis}</dd></div>}{selectedPreview && <div><dt>{t('分辨率')}</dt><dd>{selectedPreview.width} × {selectedPreview.height}</dd></div>}<div><dt>{t('关联作品')}</dt><dd>{workIdentity(work)}</dd></div><div><dt>{t('本地路径')}</dt><dd><button className="directory-path-link" aria-label={t('打开素材所在目录')} disabled={!capabilities.can_open_folder || opening || !selectedPreview && !sourceDirectory?.available} onClick={async () => { if (!selectedPreview) { await open(selectedSource?.id); return; } setOpening(true); try { const result = await request<{ message: string }>(`/api/works/${id}/preview/open-folder`, { method: 'POST' }); notify({ kind: 'success', message: result.message }); } catch (reason) { setSaveError(errorMessage(reason)); } finally { setOpening(false); } }}><code>{filePath}</code>{opening && <LoaderCircle size={14} className="spin" />}</button></dd></div></dl>
             </> : <p className="detail-surface-content help-text">{t('暂无关联素材')}</p>}
           </section></div>
-          <details className="detail-surface detail-preview-tools"><summary>{t('预览生成与匹配')}{matchingDirty && <span className="unsaved-label">{t('未保存')}</span>}</summary><div className="detail-preview-column">
+
+          {assets.some(asset => !['video', 'script', 'funscript'].includes(asset.kind)) && <details className="detail-surface detail-history"><summary>{t('辅助素材')}</summary>{assetGroup('辅助素材', assets.filter(asset => !['video', 'script', 'funscript'].includes(asset.kind)), FileText)}</details>}
+          <details className="detail-surface detail-history"><summary>{t('历史资料')}</summary><div className="detail-surface-content">{history.length ? <><dl className="metadata-list">{history.map(([label, value]) => { const link = safeLink(value); return <div key={label}><dt>{label}</dt><dd>{link ? <a href={link} target="_blank" rel="noreferrer">{displayValue(value)}</a> : displayValue(value)}</dd></div>; })}</dl><p className="help-text">{t('来自首次导入的历史资料，计划日期不代表实际发布日期。')}</p></> : <p className="help-text">{t('暂无关联的历史资料。')}</p>}</div></details>
+        </>}
+      </section>
+      <section id="work-detail-panel-generation" role="tabpanel" aria-labelledby="work-detail-tab-generation" hidden={tab !== 'generation'} className="work-detail-panel">
+        {visitedTabs.generation && <>          <div className="detail-preview-column">
 <PreviewSection work={work} capabilities={capabilities} onDirtyChange={setMatchingDirty} onPreviewStateChanged={setPreviewData} onSourcesChanged={async () => {
           const updated = await request<Work>(`/api/works/${id}`);
           // Refresh discovered source data while retaining locally edited text and tags.
@@ -426,10 +438,7 @@ export function WorkDetail({ id, capabilities, onClose, onSaved, notify, present
           setDirectoryId(updated.directories.length === 1 ? updated.directories[0].id : null);
           onSaved();
         }} />
-          </div></details>
-          {assets.some(asset => !['video', 'script', 'funscript'].includes(asset.kind)) && <details className="detail-surface detail-history"><summary>{t('辅助素材')}</summary>{assetGroup('辅助素材', assets.filter(asset => !['video', 'script', 'funscript'].includes(asset.kind)), FileText)}</details>}
-          <details className="detail-surface detail-history"><summary>{t('历史资料')}</summary><div className="detail-surface-content">{history.length ? <><dl className="metadata-list">{history.map(([label, value]) => { const link = safeLink(value); return <div key={label}><dt>{label}</dt><dd>{link ? <a href={link} target="_blank" rel="noreferrer">{displayValue(value)}</a> : displayValue(value)}</dd></div>; })}</dl><p className="help-text">{t('来自首次导入的历史资料，计划日期不代表实际发布日期。')}</p></> : <p className="help-text">{t('暂无关联的历史资料。')}</p>}</div></details>
-        </>}
+          </div></>}
       </section>
       <section id="work-detail-panel-release" role="tabpanel" aria-labelledby="work-detail-tab-release" hidden={tab !== 'release'} className="work-detail-panel">
         {visitedTabs.release && <WorkReleasePanel work={work} onSaved={publicationSaved} onDirtyChange={setReleaseDirty} onBusyChange={setChangingStatus} />}
@@ -437,6 +446,7 @@ export function WorkDetail({ id, capabilities, onClose, onSaved, notify, present
       </section>
     </>}
     {work && editingTags && <WorkTagEditor work={work} onClose={() => setEditingTags(false)} onSaved={value => { setWork(previous => previous ? { ...previous, tags: value.tags, tags_revision: value.tags_revision } : previous); onSaved(); }} />}
+    {work && editingCover && <CoverEditor ref={coverEditor} work={work} onOpenFolder={assetId => void open(assetId)} onClose={() => setEditingCover(false)} onSaved={value => { setWork(previous => previous ? { ...previous, cover_url: value.cover_url, cover_revision: value.revision, cover_mode: value.mode } : previous); setEditingCover(false); onSaved(); notify({ kind: 'success', message: t('作品封面已保存') }); }} />}
     {SHOW_ES_POSTS && work && editingPost && <ReleasePostEditor workId={id} onClose={() => setEditingPost(false)} />}
   </>;
   return presentation === 'page' ? <article className="detail-page" aria-labelledby="detail-title">{content}</article> : <dialog className="detail-dialog" ref={dialog} aria-labelledby="detail-title" onCancel={event => { event.preventDefault(); close(); }} onClick={event => { if (event.target === event.currentTarget) { const rect = event.currentTarget.getBoundingClientRect(); if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) close(); } }}>{content}</dialog>;

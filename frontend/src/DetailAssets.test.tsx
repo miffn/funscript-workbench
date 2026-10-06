@@ -23,18 +23,19 @@ beforeEach(() => {
   } : work), { headers: { 'Content-Type': 'application/json' } }))));
 });
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
-const page = () => render(<WorkDetail id={7} presentation="page" capabilities={{ can_open_folder: false, reason: '' }} onClose={() => {}} onSaved={() => {}} notify={() => {}} />);
+const page = (supported = false) => render(<WorkDetail id={7} presentation="page" capabilities={{ can_open_folder: supported, can_play_video: supported, reason: '' }} onClose={() => {}} onSaved={() => {}} notify={() => {}} />);
 
-it('browses real video, preview and script files in separate groups and shows source metadata without inventing playback', async () => {
-  const view = page(); await screen.findByLabelText('标题');
+it('browses real video, preview and script files in separate groups and uses the local source player', async () => {
+  const view = page(true); await screen.findByLabelText('标题');
   fireEvent.click(screen.getByRole('tab', { name: '素材' }));
   const groups = view.container.querySelectorAll('.detail-assets-columns .source-asset-group > header h3');
   expect([...groups].map(heading => heading.textContent)).toEqual(['视频素材', '预览素材', '脚本素材']);
   await screen.findByRole('button', { name: /clip-01.webm/ });
   const inspector = screen.getByRole('region', { name: '素材详情' });
   expect(within(inspector).getByText('main.mp4')).toBeTruthy();
-  expect(inspector.querySelector('video')).toBeNull();
-  expect(within(inspector).getByText('作品封面')).toBeTruthy();
+  const source = inspector.querySelector('video')!;
+  expect(source.getAttribute('src')).toBe('/api/works/7/assets/9/media');
+  expect(source.controls).toBe(true); expect(source.autoplay).toBe(false);
   expect(within(inspector).getByText('D:\\library\\S070\\videos\\main.mp4')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: /main.pitch.funscript/ }));
   expect(within(inspector).getByText('main.pitch.funscript')).toBeTruthy();
@@ -58,22 +59,27 @@ it('uses the existing manual-play preview renderer and supports actual GIF and h
   expect(within(inspector).getByRole('button', { name: '原尺寸查看' })).toBeTruthy();
 });
 
-it('keeps generation and source matching mounted in a collapsed tool section', async () => {
+it('keeps generation separate from browsing and retains source mapping drafts across tabs', async () => {
   const view = page(); await screen.findByLabelText('标题'); fireEvent.click(screen.getByRole('tab', { name: '素材' }));
-  const tools = view.container.querySelector<HTMLDetailsElement>('.detail-preview-tools')!;
-  expect(tools.open).toBe(false);
+  expect(view.container.querySelector('.preview-matching')).toBeNull();
+  fireEvent.click(screen.getByRole('tab', { name: '预览生成与匹配' }));
   await screen.findByLabelText('Pitch · 俯仰');
-  expect(tools.querySelector('.preview-matching')).toBeTruthy();
-  fireEvent.click(screen.getByText('预览生成与匹配'));
-  expect(tools.open).toBe(true);
   fireEvent.change(screen.getByLabelText('Pitch · 俯仰'), { target: { value: '' } });
-  fireEvent.click(screen.getByText('预览生成与匹配'));
-  expect(tools.open).toBe(false);
+  fireEvent.click(screen.getByRole('tab', { name: '素材' }));
+  expect(screen.queryByRole('button', { name: '保存对应关系' })).toBeNull();
+  fireEvent.click(screen.getByRole('tab', { name: '预览生成与匹配' }));
+  expect((screen.getByLabelText('Pitch · 俯仰') as HTMLSelectElement).value).toBe('');
   fireEvent.click(screen.getByRole('tab', { name: '资料与标签' }));
   fireEvent.click(screen.getByRole('button', { name: '返回库存' }));
   expect(screen.getByText('有尚未保存的修改')).toBeTruthy();
 });
 
+it('keeps source playback unavailable on a remote client', async () => {
+  page(); await screen.findByLabelText('标题'); fireEvent.click(screen.getByRole('tab', { name: '素材' }));
+  const inspector = screen.getByRole('region', { name: '素材详情' });
+  expect(inspector.querySelector('video')).toBeNull();
+  expect(within(inspector).getByText('原视频播放仅在素材所在本机可用。')).toBeTruthy();
+});
 it('reports actual preview state through the optional stable callback', async () => {
   const onState = vi.fn();
   render(<PreviewSection work={work} capabilities={{ can_open_folder: false, reason: '' }} onPreviewStateChanged={onState} />);

@@ -1,4 +1,5 @@
 import { getLanguage, translate as t } from './i18n';
+import { getWorkspaceTimezone } from './WorkspaceTimezone';
 
 export type Status = 'pending' | 'published';
 export type Filter = 'all' | Status | 'to_make' | 'es_published' | 'patreon_published';
@@ -31,6 +32,7 @@ export interface Work {
   es_planned_date?: string | null; patreon_planned_date?: string | null;
   duration_seconds?: number | null; duration_minutes?: number | null; duration_status?: string; duration_error?: string | null;
   duration_last_known_seconds?: number | null; duration_last_known_minutes?: number | null;
+  cover_revision?: number; cover_mode?: 'automatic' | 'manual';
 }
 export type PublicationPlatform = 'es' | 'patreon';
 export type CalendarMode = 'actual' | 'planned';
@@ -60,9 +62,10 @@ export type IdentificationMode = 'numbered' | 'folder';
 export interface ScanCandidate { id: number; name: string; script_id?: string | null; path: string; windows_path: string; root_path: string; available: boolean; revision: number; missing_work_ids: number[]; video_count: number; script_count: number }
 export interface CandidateWork { id: number; script_id: string | null; title: string; association_revision: number }
 export interface ScanCandidates { items: ScanCandidate[]; works: CandidateWork[]; total: number }
-export interface Inventory { items: Work[]; total: number; page: number; page_size: number; stats: { total: number; pending: number; to_make?: number; published: number; es_published?: number; patreon_published?: number; issues: number }; last_scan: { at: string; [key: string]: unknown } | null }
-export interface Capabilities { can_open_folder: boolean; reason: string }
+export interface Inventory { items: Work[]; total: number; page: number; page_size: number; snapshot_id?: string; inventory_revision?: number; stats: { total: number; pending: number; to_make?: number; published: number; es_published?: number; patreon_published?: number; issues: number }; last_scan: { at: string; [key: string]: unknown } | null }
+export interface Capabilities { can_open_folder: boolean; can_play_video?: boolean; can_edit_cover?: boolean; reason: string }
 export interface Settings { roots: (string | Record<string, unknown>)[]; scan_interval_seconds: number; scan_roots_revision?: number; [key: string]: unknown }
+export interface WorkspaceTimezoneState { timezone: string; revision: number; choices: string[] }
 
 export class ApiError extends Error {
   status: number;
@@ -85,8 +88,9 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
 export function errorMessage(error: unknown) { return error instanceof Error ? error.message : '操作失败，请稍后重试'; }
 export function formatDate(value?: string | null): string {
   if (!value) return t('尚无记录');
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
   const date = new Date(value.endsWith('Z') || /[+-]\d\d:\d\d$/.test(value) ? value : `${value}Z`);
-  return Number.isNaN(date.valueOf()) ? value : new Intl.DateTimeFormat(getLanguage().language, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Shanghai' }).format(date);
+  return Number.isNaN(date.valueOf()) ? value : new Intl.DateTimeFormat(getLanguage().language, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false, timeZone: getWorkspaceTimezone().timezone }).format(date);
 }
 export function formatSize(bytes: number) {
   if (!Number.isFinite(bytes) || bytes < 0) return '—';

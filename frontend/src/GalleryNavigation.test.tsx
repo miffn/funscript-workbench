@@ -24,6 +24,8 @@ let scrollTo: ReturnType<typeof vi.spyOn>;
 let scrollPosition: number;
 let workError: { id: number; status: number } | null;
 let records: Map<number, Work>;
+let inventoryRevision: number;
+let snapshots: Map<string, Inventory>;
 
 it('opens and returns from an unnumbered folder work through its stable numeric route', async () => {
   const existing = records.get(7)!;
@@ -48,7 +50,8 @@ beforeEach(() => {
   localStorage.clear();
   window.history.pushState(null, '', '/#/inventory');
   document.title = '脚本工作台'; document.body.style.overflow = 'auto';
-  scrollPosition = 0; workError = null; records = new Map([7, 8].map(id => [id, work(id)]));
+  scrollPosition = 0; workError = null; inventoryRevision = 1; snapshots = new Map();
+  records = new Map([7, 8, ...Array.from({ length: 70 }, (_, index) => 100 + index)].map(id => [id, work(id)]));
   Object.defineProperty(window, 'scrollY', { configurable: true, get: () => scrollPosition });
   scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation((...args: unknown[]) => {
     const options = args[0];
@@ -60,10 +63,22 @@ beforeEach(() => {
     const url = new URL(path, 'http://localhost');
     if (url.pathname === '/api/works') {
       const page = Number(url.searchParams.get('page') || '1');
-      const result: Inventory = { items: [records.get(page === 1 ? 7 : 8)!], total: 72, page, page_size: 24,
-        stats: { total: 72, pending: 72, published: 0, es_published: 0, patreon_published: 0, issues: 1 }, last_scan: null };
-      return response(result);
+      const savedToken = url.searchParams.get('snapshot_id');
+      const query = new URLSearchParams(url.searchParams);
+      for (const key of ['page', 'page_size', 'snapshot_id']) query.delete(key);
+      const token = savedToken || `snapshot-${query.toString()}-${inventoryRevision}`;
+      if (savedToken && !snapshots.has(savedToken)) return response({ detail: '库存快照已过期' }, 410);
+      if (!snapshots.has(token)) {
+        const order = [7, ...Array.from({ length: 23 }, (_, index) => 100 + index), 8, ...Array.from({ length: 47 }, (_, index) => 123 + index)];
+        snapshots.set(token, { items: order.map(id => structuredClone(records.get(id)!)), total: 72, page: 1, page_size: 24,
+          snapshot_id: token, inventory_revision: inventoryRevision,
+          stats: { total: 72, pending: 72, published: 0, es_published: 0, patreon_published: 0, issues: 1 }, last_scan: null });
+      }
+      const snapshot = snapshots.get(token)!;
+      return response({ ...snapshot, items: snapshot.items.slice((page - 1) * 24, page * 24), page });
     }
+    if (path === '/api/inventory-revision') return response({ inventory_revision: inventoryRevision, scan_active: false });
+    if (path === '/api/workspace-timezone') return response({ timezone: 'Asia/Shanghai', revision: 1 });
     if (path === '/api/profile') return response({ name: '测试工作台', bio: '测试简介', avatar: null, revision: 0 });
     if (path === '/api/language') return response({ language: 'zh-CN', revision: 0 });
     if (path === '/api/capabilities') return response({ can_open_folder: false, reason: '仅素材主机可用' });
@@ -80,7 +95,7 @@ beforeEach(() => {
       if (resource === 'links') return response({ work_id: id, links: { ...emptyLinks }, links_revision: 0, es_published_date: null, patreon_published_date: null });
       if (!resource) {
         if (!current || workError?.id === id) return response({ detail: current ? '服务暂时不可用' : '库存编号不存在' }, current ? workError!.status : 404);
-        if (init?.method === 'PATCH') { const next = { ...current, ...JSON.parse(String(init.body)) }; records.set(id, next); return response(next); }
+        if (init?.method === 'PATCH') { const next = { ...current, ...JSON.parse(String(init.body)) }; records.set(id, next); inventoryRevision++; return response(next); }
         return response(current);
       }
     }
@@ -126,8 +141,8 @@ async function filteredGallery() {
     expect(params.get('q')).toBe('needle'); expect(params.get('status')).toBe('pending');
     expect(params.get('tag_ids')).toBe('1'); expect(params.get('issues_only')).toBe('true');
   });
-  await waitFor(() => expect((screen.getByRole('button', { name: '下一页' }) as HTMLButtonElement).disabled).toBe(false));
-  fireEvent.click(screen.getByRole('button', { name: '下一页' }));
+  await waitFor(() => expect((screen.getByRole('button', { name: '加载更多' }) as HTMLButtonElement).disabled).toBe(false));
+  fireEvent.click(screen.getByRole('button', { name: '加载更多' }));
   await card(8); await waitFor(() => expect(latestInventoryParams().get('page')).toBe('2'));
   scrollPosition = 612; document.documentElement.scrollTop = 612; scrollTo.mockClear();
 }
@@ -137,7 +152,8 @@ async function assertFilteredGallery() {
   expect(document.querySelector('.inventory-filter-summary')?.textContent).toContain('作者 A');
   expect(document.querySelector('.inventory-filter-summary')?.textContent).toContain('仅看异常');
   expect(within(screen.getByRole('complementary', { name: '工作台导航' })).getByRole('button', { name: /^待发布/ }).getAttribute('aria-current')).toBe('page');
-  expect(screen.getByText('第 2 / 3 页 · 每页 24 个')).toBeTruthy();
+  expect(screen.getByText('已加载 48 / 72 个库存')).toBeTruthy();
+  expect(screen.getByRole('button', { name: '查看 S007 作品 7' })).toBeTruthy();
   await waitFor(() => {
     const params = latestInventoryParams();
     expect(params.get('q')).toBe('needle'); expect(params.get('status')).toBe('pending');
@@ -179,10 +195,12 @@ it('loads a direct work URL and remains a page after a simulated refresh, regard
   expect(window.location.hash).not.toContain('/works/');
 });
 
-it('restores search, publication filter, tag, page and scroll through the detail Back button', async () => {
+it('restores search, publication filter, tag, accumulated batches and scroll without refetching through the detail Back button', async () => {
   await filteredGallery(); fireEvent.click(await card(8)); await detailHeading(8);
+  const requestsBeforeReturn = fetchMock.mock.calls.filter(([path]) => path.startsWith('/api/works?')).length;
   fireEvent.click(screen.getByRole('button', { name: '返回库存' }));
   await assertFilteredGallery(); expect(screen.queryByRole('dialog')).toBeNull();
+  expect(fetchMock.mock.calls.filter(([path]) => path.startsWith('/api/works?'))).toHaveLength(requestsBeforeReturn);
   expect(document.title).not.toContain('S008');
 });
 
@@ -290,8 +308,8 @@ it('skips to main content within a dirty detail page without changing its route 
   }
 });
 
-describe('gallery position restoration after an inventory refresh error', () => {
-  it.each(['success', 'failure'] as const)('survives a cancelled animation frame and restores focus/scroll after the new request ends in %s', async outcome => {
+describe('gallery position restoration after refreshing a modified detail', () => {
+  it.each(['success', 'failure'] as const)('does not fetch while detail is open and restores focus/scroll after the return refresh ends in %s', async outcome => {
     render(<App />); await card();
     scrollPosition = 412; fireEvent.click(await card()); await detailHeading();
     const originalFetch = fetchMock.getMockImplementation()!;
@@ -306,11 +324,11 @@ describe('gallery position restoration after an inventory refresh error', () => 
       }
       return originalFetch(path, init);
     });
-    // A save refreshes inventory in the background while its previous cards stay cached.
+    // A save marks the inventory stale, preserving its cached cards until the user returns.
     fireEvent.change(screen.getByLabelText('备注'), { target: { value: '已保存的备注' } });
     fireEvent.click(screen.getByRole('button', { name: '保存信息' }));
     await screen.findByText('S007 的作品信息已保存');
-    await waitFor(() => expect(inventoryRequests).toBe(1));
+    expect(inventoryRequests).toBe(0);
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
 
     const frames = new Map<number, FrameRequestCallback>(); let nextFrame = 0;
@@ -322,7 +340,7 @@ describe('gallery position restoration after an inventory refresh error', () => 
       fireEvent.click(screen.getByRole('button', { name: '返回库存' }));
       await new Promise(resolve => setTimeout(resolve, 30));
     });
-    await waitFor(() => expect(inventoryRequests).toBe(2));
+    await waitFor(() => expect(inventoryRequests).toBe(1));
     expect(window.location.hash).toBe('#/inventory');
     expect(cancel).toHaveBeenCalled();
     expect(frames.size).toBe(0);
@@ -334,7 +352,10 @@ describe('gallery position restoration after an inventory refresh error', () => 
         : await response({ detail: '库存仍暂时无法读取' }, 503));
     });
     const target = await card();
-    if (outcome === 'failure') expect((await screen.findByRole('alert')).textContent).toContain('库存仍暂时无法读取');
+    if (outcome === 'failure') {
+      expect(await screen.findByText('库存仍暂时无法读取')).toBeTruthy();
+      expect(screen.getByRole('button', { name: '重试加载' })).toBeTruthy();
+    }
     await waitFor(() => expect(frames.size).toBe(1));
     // Execute the pending callback, not merely assert that a frame was scheduled.
     await act(async () => {
@@ -348,6 +369,9 @@ describe('gallery position restoration after an inventory refresh error', () => 
 });
 it('abandons a pending gallery restoration when navigation changes to All inventory before its refresh finishes', async () => {
   await filteredGallery(); fireEvent.click(await card(8)); await detailHeading(8);
+  fireEvent.change(screen.getByLabelText('备注'), { target: { value: '修改后保留的备注' } });
+  fireEvent.click(screen.getByRole('button', { name: '保存信息' }));
+  await screen.findByText('S008 的作品信息已保存');
   const originalFetch = fetchMock.getMockImplementation()!;
   let pendingPath = ''; let resolvePending!: (value: Response) => void;
   const pendingRefresh = new Promise<Response>(resolve => { resolvePending = resolve; });
