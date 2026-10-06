@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { Folder, RefreshCw, Send, Palette, Plug, Sun, Moon, Monitor, LayoutGrid, List, Tags } from 'lucide-react';
 import { SettingsPage } from './components';
-import { LanguageSettings } from './LanguageSettings';
 import { EsTemplateSettings } from './ReleasePosts';
 import { SHOW_ES_POSTS } from './features';
 import type { Capabilities } from './api';
@@ -39,7 +38,7 @@ export function SettingsWorkbench({ capabilities, revision, theme, onTheme, view
         <section className="settings-card"><div className="section-heading"><h3>{t('主题外观')}</h3></div><div className="preference-choices">{([['auto', '跟随系统', Monitor, '随系统切换'], ['light', '浅色', Sun, '明亮清晰'], ['dark', '深色', Moon, '降低环境亮度']] as const).map(([value, label, Icon, hint]) => <button key={value} aria-pressed={theme === value} onClick={() => onTheme(value)}><Icon size={22} /><span>{t(label)}</span><small>{t(hint)}</small></button>)}</div></section>
         <section className="settings-card"><div className="section-heading"><h2>{t('库存显示')}</h2></div><div className="preference-choices">{([['gallery', '封面画廊', LayoutGrid], ['list', '紧凑目录', List], ['tags', '标签列表', Tags]] as const).map(([value, label, Icon]) => <button key={value} aria-pressed={view === value} onClick={() => onView(value)}><Icon size={22} /><span>{t(label)}</span></button>)}</div></section>
         <section className="settings-card"><div className="section-heading"><h2>{t('交互与动效')}</h2></div><label className="preference-row preference-toggle"><div><strong>{t('轻柔弹性')}</strong><p>{t('对话框与交互反馈使用轻柔的弹性过渡。')}</p></div><input type="checkbox" checked={spring} disabled={reduceMotion} onChange={event => onSpring(event.target.checked)} /></label><label className="preference-row preference-toggle"><div><strong>{t('减少动态效果')}</strong><p>{t('简化过渡；同时遵循系统的减少动态效果设置。')}</p></div><input type="checkbox" checked={reduceMotion} onChange={event => onReduceMotion(event.target.checked)} /></label><p className="help-text">{t('外观和库存显示仅保存在当前浏览器。')}</p></section>
-        <LanguageSettings />
+
       </div>
     </div>
   </div>;

@@ -1,3 +1,4 @@
+import { LanguageSettings } from './LanguageSettings';
 import { workIdentity } from './api';
 import { translate as t, useI18n } from './i18n';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -242,7 +243,7 @@ export default function App() {
         <button title={t("标签管理")} className={page === 'tags' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('tags')} aria-current={page === 'tags' ? 'page' : undefined}><TagIcon size={18} /><span>{t("标签管理")}</span></button>
         <button title={t("设置")} className={page === 'settings' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('settings')} aria-current={page === 'settings' ? 'page' : undefined}><Settings2 size={18} /><span>{t("设置")}</span></button>
       </nav></div>
-      <div className="sidebar-footer"><div className="host-state"><span className={`connection-dot ${error ? 'offline' : ''}`} /><span>{error ? t("连接待恢复") : inventory ? t("库存手动扫描") : t("正在连接")}</span></div><button className="theme-toggle" title={dark ? t('切换浅色主题') : t('切换深色主题')} onClick={() => setTheme(dark ? 'light' : 'dark')} aria-label={dark ? t("切换浅色主题") : t("切换深色主题")}>{dark ? <Sun size={17} /> : <Moon size={17} />}<span>{dark ? t('切换浅色') : t('切换深色')}</span></button><button className="theme-toggle sidebar-toggle" aria-expanded={!sidebarCollapsed} aria-label={t(sidebarCollapsed ? '展开侧栏' : '收起侧栏')} title={t(sidebarCollapsed ? '展开侧栏' : '收起侧栏')} onClick={() => setSidebarCollapsed(!sidebarCollapsed)}>{sidebarCollapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}<span>{t(sidebarCollapsed ? '展开侧栏' : '收起侧栏')}</span></button></div>
+      <div className="sidebar-footer"><LanguageSettings /><button className="theme-toggle" title={dark ? t('切换浅色主题') : t('切换深色主题')} onClick={() => setTheme(dark ? 'light' : 'dark')} aria-label={dark ? t("切换浅色主题") : t("切换深色主题")}>{dark ? <Sun size={17} /> : <Moon size={17} />}<span>{dark ? t('切换浅色') : t('切换深色')}</span></button><button className="theme-toggle sidebar-toggle" aria-expanded={!sidebarCollapsed} aria-label={t(sidebarCollapsed ? '展开侧栏' : '收起侧栏')} title={t(sidebarCollapsed ? '展开侧栏' : '收起侧栏')} onClick={() => setSidebarCollapsed(!sidebarCollapsed)}>{sidebarCollapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}<span>{t(sidebarCollapsed ? '展开侧栏' : '收起侧栏')}</span></button></div>
     </aside>
     <main id="main-content" className="main-content" tabIndex={-1}>
       <div className="page-kicker"><span className="last-updated">{t("最近扫描 ·")}{formatDate(inventory?.last_scan?.at)}</span></div>

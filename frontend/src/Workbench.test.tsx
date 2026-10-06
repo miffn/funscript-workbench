@@ -90,6 +90,9 @@ it('keeps navigation accessible when collapsed and places the expand control bel
   expect(document.querySelector('.app-shell')?.classList.contains('sidebar-collapsed')).toBe(true);
   expect(within(sidebar).getByRole('button', { name: /^标签管理/ })).toBeTruthy();
   const footer = sidebar.querySelector('.sidebar-footer')!;
+  expect(within(sidebar).getByRole('combobox', { name: '界面语言' })).toBeTruthy();
+  expect(footer.querySelector('.host-state')).toBeNull();
+  expect(screen.queryByText('库存手动扫描')).toBeNull();
   expect([...footer.querySelectorAll('button')].map(button => button.getAttribute('aria-label'))).toEqual(['切换深色主题', '展开侧栏']);
   fireEvent.click(screen.getByRole('button', { name: '切换深色主题' }));
   expect(document.documentElement.dataset.theme).toBe('dark');

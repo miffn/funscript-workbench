@@ -21,22 +21,22 @@ it('saves a switch to English and restores the database language on reload', asy
   });
   vi.stubGlobal('fetch', fetchMock);
   const initial = render(<LanguageSettings />);
-  fireEvent.click(screen.getByRole('button', { name: 'English' }));
-  await screen.findByRole('heading', { name: 'Interface language' });
+  fireEvent.change(screen.getByRole('combobox', { name: '界面语言' }), { target: { value: 'en' } });
+  await screen.findByRole('combobox', { name: 'Interface language' });
   expect(screen.getByRole('status').textContent).toBe('Interface language saved');
   initial.unmount(); act(() => setLanguage({ language: 'zh-CN', revision: 0 }));
   render(<><LanguageBootstrap /><LanguageSettings /></>);
-  await screen.findByRole('heading', { name: 'Interface language' });
-  expect(screen.getByRole('button', { name: 'English' }).getAttribute('aria-pressed')).toBe('true');
+  await screen.findByRole('combobox', { name: 'Interface language' });
+  expect((screen.getByRole('combobox', { name: 'Interface language' }) as HTMLSelectElement).value).toBe('en');
   expect(document.documentElement.lang).toBe('en');
 });
 
 it('keeps the current language when saving fails', async () => {
   vi.stubGlobal('fetch', vi.fn(async (_url: string, init?: RequestInit) => response(init?.method === 'PUT' ? { detail: '服务暂不可用' } : { language: 'zh-CN', revision: 0 }, init?.method === 'PUT' ? 503 : 200)));
   render(<LanguageSettings />);
-  fireEvent.click(screen.getByRole('button', { name: 'English' }));
+  fireEvent.change(screen.getByRole('combobox', { name: '界面语言' }), { target: { value: 'en' } });
   await screen.findByRole('alert');
-  expect(screen.getByRole('button', { name: '简体中文' }).getAttribute('aria-pressed')).toBe('true');
+  expect((screen.getByRole('combobox', { name: '界面语言' }) as HTMLSelectElement).value).toBe('zh-CN');
 });
 
 it('translates the complete inventory shell while keeping user names and titles', async () => {
@@ -73,5 +73,5 @@ it('does not let a delayed language check overwrite a newer saved choice', async
   render(<><LanguageBootstrap /><LanguageSettings /></>);
   act(() => setLanguage({ language: 'en', revision: 2 }));
   await act(async () => finish(response({ language: 'zh-CN', revision: 1 })));
-  expect(screen.getByRole('button', { name: 'English' }).getAttribute('aria-pressed')).toBe('true');
+  expect((screen.getByRole('combobox', { name: 'Interface language' }) as HTMLSelectElement).value).toBe('en');
 });

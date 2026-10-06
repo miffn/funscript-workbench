@@ -30,3 +30,22 @@ body{font-size:14px;line-height:1.5}button{transition:background-color var(--mot
 @media(max-width:700px){.sidebar-footer{width:100%}.sidebar-collapsed .sidebar-footer .theme-toggle{justify-content:center}}
 @media(pointer:coarse){.sidebar-collapsed .sidebar-footer .theme-toggle{width:44px}}
 @media(pointer:coarse){.work-info>.work-link-buttons .work-link-button{min-height:44px}}
+
+/* Language stays available beside the sidebar's persistent appearance controls. */
+.sidebar-language{min-width:0;position:relative}
+.sidebar-language-control{position:relative;display:flex;align-items:center;gap:9px;min-height:36px;border-radius:8px;color:var(--muted);cursor:pointer;padding:0 12px}
+.sidebar-language-control:hover,.sidebar-language-control:focus-within{background:var(--soft);color:var(--text)}
+.sidebar-language-control select{min-width:0;flex:1;appearance:none;border:0;background:transparent;color:inherit;cursor:pointer;padding:8px 0;font-size:12px;color-scheme:light}
+html[data-theme=dark] .sidebar-language-control select{color-scheme:dark}
+.sidebar-language-control option{background:var(--surface);color:var(--text)}
+.sidebar-language-control select:focus-visible{outline:0}
+.sidebar-language-control:has(select:focus-visible){outline:2px solid var(--focus);outline-offset:2px}
+.sidebar-language .language-feedback{display:flex;align-items:center;gap:5px;margin:3px 8px 6px;font-size:11px;overflow-wrap:anywhere}
+.sidebar-collapsed .sidebar-language-control{width:36px;padding:0;justify-content:center}
+.sidebar-collapsed .sidebar-language-control select{position:absolute;inset:0;flex:none;width:100%;height:100%;opacity:0;padding:0}
+.sidebar-collapsed .language-chevron{display:none}
+.sidebar-collapsed .sidebar-language .language-feedback{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
+@media(pointer:coarse){.sidebar-language-control{min-height:44px}.sidebar-collapsed .sidebar-language-control{width:44px}}
+
+.sidebar-language .language-feedback[role=status]{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;margin:0}
+.sidebar-footer{flex-shrink:0;position:sticky;bottom:0;background:var(--sidebar)}
