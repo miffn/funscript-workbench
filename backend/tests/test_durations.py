@@ -280,8 +280,8 @@ def test_moved_workspace_to_archive_is_ready_and_never_double_counted(durations,
         assert db.execute('SELECT COUNT(*) FROM directories WHERE work_id=? AND available=1', (current['id'],)).fetchone()[0] == 1
 
 
-@pytest.mark.parametrize('removed', [False, True])
-def test_uncertain_conflicting_root_cannot_establish_single_binding(durations, tmp_path, removed):
+@pytest.mark.parametrize('root_state', ['offline', 'offline_rematch', 'removed'])
+def test_uncertain_conflicting_root_cannot_establish_single_binding(durations, tmp_path, root_state):
     config, store, _, values, _ = durations
     add_videos(durations, names=('a.mp4',))
     archive = tmp_path / '2026'
@@ -295,7 +295,7 @@ def test_uncertain_conflicting_root_cannot_establish_single_binding(durations, t
     scanner.scan()
     assert state(store)['duration_minutes'] is None
     assert '目录冲突' in state(store)['duration_error']
-    if removed:
+    if root_state == 'removed':
         with store.connection() as db:
             catalog = json.loads(db.execute("SELECT value FROM settings WHERE key='root_catalog'").fetchone()[0])
             catalog['roots'] = [root for root in catalog['roots'] if root['path'] != str(archive)]
@@ -304,12 +304,31 @@ def test_uncertain_conflicting_root_cannot_establish_single_binding(durations, t
         refresh_all_duration(store, config)
     else:
         archive.rename(tmp_path / 'disconnected-drive')
-        scanner.scan()
+        scanner.scan(target_id='S070' if root_state == 'offline_rematch' else None)
     current = state(store)
     assert current['duration_status'] == 'partial' and current['duration_minutes'] is None
     assert current['duration_last_known_minutes'] is None
     assert '目录冲突' in current['duration_error']
     assert not any(tag['category'] == 'duration' for tag in current['tags'])
+    # Repeated scans and a service restart must not silently accept the readable copy.
+    Scanner(Store(config.data_dir), config).scan()
+    current = state(store)
+    assert current['duration_status'] == 'partial' and current['duration_minutes'] is None
+    assert current['duration_last_known_minutes'] is None
+    with store.connection() as db:
+        assert db.execute('SELECT COUNT(*) FROM directories WHERE work_id=? AND available=1', (current['id'],)).fetchone()[0] == 2
+        assert db.execute("SELECT 1 FROM issues WHERE work_id=? AND type='duplicate_identifier'", (current['id'],)).fetchone()
+    if root_state != 'removed':
+        (tmp_path / 'disconnected-drive').rename(archive)
+        scanner.scan()
+        assert state(store)['duration_status'] == 'partial'
+        # A readable root that confirms the duplicate has vanished resolves the conflict.
+        second.rename(archive / 'unidentified')
+        scanner.scan()
+        current = state(store)
+        assert current['duration_status'] == 'ready' and current['duration_seconds'] == 60
+        assert current['duration_error'] is None
+        assert next(tag for tag in current['tags'] if tag['category'] == 'duration')['name'] == '1 分钟'
 
 
 def test_unreadable_current_directory_without_video_records_blocks_accurate_sum(durations, monkeypatch):

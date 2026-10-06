@@ -340,7 +340,8 @@ class Scanner:
                     self.store.issue(db, "identifier_changed", f"路径曾关联 {old['script_id']}，现在识别为 {script_id}；请核对", script_id, work_id, [item["windows_path"]])
                 self.bind_item(db, item, work_id, timestamp)
             # A uniquely observed full code establishes its current readable location.
-            # Offline/removed roots contain cached history, not a second observed copy.
+            # Offline/removed roots contain cached history, not a newly observed copy.
+            # They cannot, however, resolve a previously observed duplicate conflict.
             by_code = {}
             for item in observed:
                 if item['script_id'] is not None:
@@ -353,6 +354,9 @@ class Scanner:
                 row = db.execute('SELECT id FROM works WHERE script_id=?', (code,)).fetchone()
                 if row is None or not db.execute('SELECT 1 FROM directories WHERE work_id=? AND path=? AND available=1', (row['id'], items[0]['path'])).fetchone():
                     continue  # A pending recovery candidate does not establish a binding.
+                previous_association = before.get(row['id'])
+                if previous_association and len(previous_association[1]) > 1:
+                    continue  # Only a readable root can confirm a conflicting copy is gone.
                 for directory in db.execute('SELECT * FROM directories WHERE work_id=? AND available=1 AND path!=?', (row['id'], items[0]['path'])).fetchall():
                     inactive_root = directory['root_path'] in unavailable or directory['root_path'] not in registered_paths
                     if not inactive_root and directory['root_path'] not in selected_paths:
