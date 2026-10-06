@@ -1,11 +1,16 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { PreviewSection } from './PreviewSection';
 import { WorkDetail } from './components';
 import type { Job, PreviewFile, PreviewMatching, PreviewState, Work } from './api';
 
 const work: Work = { id: 7, script_id: 'S025_001', title: '作品标题', notes: '已有备注', status: 'pending', cover_url: null, video_count: 1, script_count: 1, updated_at: '2026-09-30T12:00:00Z', issues: [], directories: [{ id: 12, path: '/library/S025_001', windows_path: 'D:\\library\\S025_001', available: true }], assets: [{ id: 9, directory_id: 12, name: 'main.mp4', relative_path: 'main.mp4', kind: 'video', size: 1024 }] };
+
+async function openDetailPreviewTools() {
+  fireEvent.click(await screen.findByRole('tab', { name: '素材' }));
+  fireEvent.click(screen.getByText('预览生成与匹配'));
+}
 const local = { can_open_folder: true, reason: '' };
 const remote = { can_open_folder: false, reason: '不支持打开，仅素材所在主机可用' };
 const job: Job = { id: 44, type: 'preview', status: 'queued', progress: 0, created_at: '2026-09-30T12:00:00Z', result: { work_id: 7, script_id: 'S025_001', video_asset_id: 9 } };
@@ -159,6 +164,7 @@ describe('preview generation workflow', () => {
     render(<WorkDetail id={7} capabilities={local} onClose={vi.fn()} onSaved={vi.fn()} notify={vi.fn()} />);
     const notes = await screen.findByLabelText('备注');
     fireEvent.change(notes, { target: { value: '没有保存的备注' } });
+    await openDetailPreviewTools();
     const button = await screen.findByRole('button', { name: '一键生成预览' });
     await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(button); fireEvent.click(button);
@@ -303,11 +309,13 @@ describe('file mapping and forced regeneration', () => {
     currentWork = { ...work, axis_type: '单轴', tags: [author, single], tags_revision: 1 };
     render(<WorkDetail id={7} capabilities={local} onClose={vi.fn()} onSaved={saved} notify={vi.fn()} />);
     const notes = await screen.findByLabelText('备注');
+    const hero = document.querySelector<HTMLElement>('.work-detail-hero-content')!;
     expect(screen.queryByRole('radio')).toBeNull();
-    expect(screen.getByText('D:\\library\\S025_001')).toBeTruthy();
+    expect(within(hero).getByText('D:\\library\\S025_001')).toBeTruthy();
     const title = screen.getByLabelText('标题');
     fireEvent.change(notes, { target: { value: '没有保存的备注' } });
     fireEvent.change(title, { target: { value: '正在修改的标题' } });
+    await openDetailPreviewTools();
     const rematch = await screen.findByRole('button', { name: '重新匹配文件' });
     await waitFor(() => expect((rematch as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(rematch); fireEvent.click(rematch);
@@ -320,11 +328,11 @@ describe('file mapping and forced regeneration', () => {
     await screen.findByText('2 个脚本', {}, { timeout: 3000 });
     expect((title as HTMLInputElement).value).toBe('正在修改的标题');
     expect((notes as HTMLTextAreaElement).value).toBe('没有保存的备注');
-    expect(screen.getByText('D:\\archive\\S025_001')).toBeTruthy();
+    expect(within(hero).getByText('D:\\archive\\S025_001')).toBeTruthy();
     expect(screen.queryByText('D:\\library\\S025_001')).toBeNull();
     expect(screen.queryByText('轴类型 单轴')).toBeNull();
-    expect(screen.getByText('多轴', { selector: '.tag-chip' })).toBeTruthy();
-    expect(screen.getByText('Author', { selector: '.tag-chip' })).toBeTruthy();
+    expect(within(hero).getByText('多轴', { selector: '.tag-chip' })).toBeTruthy();
+    expect(within(hero).getByText('Author', { selector: '.tag-chip' })).toBeTruthy();
     expect(saved).toHaveBeenCalledOnce();
     expect(postCount).toBe(0);
   });
@@ -374,7 +382,9 @@ it('keeps the draft base revision when polling observes an update from another p
 it('warns before closing with an unsaved mapping and does not submit it through the text save button', async () => {
   const onClose = vi.fn();
   render(<WorkDetail id={7} capabilities={local} onClose={onClose} onSaved={vi.fn()} notify={vi.fn()} />);
+  await openDetailPreviewTools();
   fireEvent.change(await screen.findByLabelText('Pitch · 俯仰'), { target: { value: '22' } });
+  fireEvent.click(screen.getByRole('tab', { name: '资料与标签' }));
   fireEvent.click(screen.getByRole('button', { name: '关闭作品详情' }));
   await screen.findByText('有尚未保存的修改');
   expect(onClose).not.toHaveBeenCalled();

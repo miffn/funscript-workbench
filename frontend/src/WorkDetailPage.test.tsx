@@ -11,7 +11,7 @@ import { LanguageBootstrap } from './LanguageSettings';
 const fixture: Work = {
   id: 7, script_id: 'S025_001', title: '已有标题', notes: '已有备注', status: 'pending',
   video_count: 1, script_count: 1, cover_url: null, issues: [], updated_at: '',
-  es_published: false, patreon_published: false,
+  es_published: false, patreon_published: false, links: { es: '', patreon: '', video: '', script: '' }, links_revision: 0,
   directories: [{ id: 12, path: '/library/S025_001', windows_path: 'D:\\library\\S025_001', available: true }],
   assets: [{ id: 9, name: 'main.mp4', relative_path: 'main.mp4', kind: 'video', size: 100, directory_id: 12 }],
 };
@@ -33,6 +33,7 @@ beforeEach(() => {
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value: showModal });
   fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
     if (pendingPath && url === pendingPath && init?.method) return new Promise<Response>(resolve => { complete = resolve; });
+    if (url.endsWith('/links')) { if (init?.method === 'PATCH') current = { ...current, ...JSON.parse(String(init.body)) }; return response({ ...current, work_id: 7, publication_revision: 'revision' }); }
     if (url === '/api/jobs') return response({ items: [] });
     if (url.includes('/preview-matching')) return response({ work_id: 7, video_asset_id: 9, mode: 'auto', revision: 0, script_asset_ids: {}, issues: [], videos: fixture.assets, scripts: [{ id: 22, name: 'pitch.funscript', relative_path: 'pitch.funscript', kind: 'script', axis: 'pitch', size: 200, directory_id: 12 }], job: null, source_changed: false });
     if (url.endsWith('/preview')) return response({ job: null, files: [], output_dir: '/output', windows_path: 'D:\\previews' });
@@ -50,9 +51,9 @@ function page() {
   return { ...view, ref };
 }
 
-it('renders a full page with a complete-ID heading, document scrolling and guarded inventory return', async () => {
+it('renders a full page with a title hero and complete-ID identity, document scrolling and guarded inventory return', async () => {
   const { unmount } = page();
-  const heading = await screen.findByRole('heading', { name: 'S025_001', level: 1 });
+  const heading = await screen.findByRole('heading', { name: '已有标题', level: 1 });
   expect(heading.closest('article')?.className).toBe('detail-page');
   expect(screen.queryByRole('dialog')).toBeNull(); expect(showModal).not.toHaveBeenCalled();
   expect(document.body.style.overflow).toBe('auto');
@@ -66,6 +67,8 @@ it('preserves title, notes and dates when continuing, then runs the requested na
   const { ref } = page(); const title = await screen.findByLabelText('标题');
   fireEvent.change(title, { target: { value: '未保存标题' } });
   fireEvent.change(screen.getByLabelText('备注'), { target: { value: '未保存备注' } });
+  fireEvent.click(screen.getByRole('tab', { name: '发布信息' }));
+  fireEvent.click(await screen.findByRole('button', { name: '编辑 ES 发布日期' }));
   fireEvent.change(screen.getByLabelText('ES 发布日期'), { target: { value: '2026-10-06' } });
   const first = vi.fn(); act(() => ref.current!.requestLeave(first));
   expect(first).not.toHaveBeenCalled();
@@ -91,7 +94,7 @@ it('clears a cancelled pending destination and allows clean navigation after sav
 });
 
 it('uses the same unsaved matching guard for page navigation as for the default dialog', async () => {
-  const { ref } = page(); const pitch = await screen.findByLabelText('Pitch · 俯仰');
+  const { ref } = page(); await screen.findByLabelText('标题'); fireEvent.click(screen.getByRole('tab', { name: '素材' })); const pitch = await screen.findByLabelText('Pitch · 俯仰');
   fireEvent.change(pitch, { target: { value: '22' } });
   await screen.findByRole('button', { name: '放弃调整' });
   const next = vi.fn(); act(() => ref.current!.requestLeave(next));
@@ -106,9 +109,9 @@ it('uses the same unsaved matching guard for page navigation as for the default 
 it.each(['save', 'status', 'folder', 'production'] as const)('blocks leave requests during a %s write', async operation => {
   if (operation === 'production') current = { ...current, production_required: true, production_revision: 3 };
   const { ref } = page(); await screen.findByLabelText('标题');
-  pendingPath = operation === 'folder' ? '/api/works/7/open-folder' : operation === 'production' ? '/api/works/7/production/confirm' : '/api/works/7';
+  pendingPath = operation === 'status' ? '/api/works/7/links' : operation === 'folder' ? '/api/works/7/open-folder' : operation === 'production' ? '/api/works/7/production/confirm' : '/api/works/7';
   if (operation === 'save') { fireEvent.change(screen.getByLabelText('备注'), { target: { value: '保存备注' } }); fireEvent.click(screen.getByRole('button', { name: '保存信息' })); }
-  if (operation === 'status') fireEvent.click(screen.getByRole('button', { name: '标记 ES 已发布' }));
+  if (operation === 'status') { fireEvent.click(screen.getByRole('tab', { name: '发布信息' })); fireEvent.click(await screen.findByRole('button', { name: '切换 ES 发布状态' })); fireEvent.click(screen.getByRole('button', { name: '保存链接' })); }
   if (operation === 'folder') fireEvent.click(screen.getByRole('button', { name: '打开文件夹' }));
   if (operation === 'production') { await waitFor(() => expect((screen.getByRole('button', { name: '确认制作完成' }) as HTMLButtonElement).disabled).toBe(false)); fireEvent.click(screen.getByRole('button', { name: '确认制作完成' })); }
   expect((screen.getByRole('button', { name: '返回库存' }) as HTMLButtonElement).disabled).toBe(true);
@@ -165,7 +168,7 @@ it('protects only unsaved page text from cross-document navigation and removes t
 });
 
 it('protects unsaved script mappings from refresh and clears the native guard when mappings are discarded', async () => {
-  page(); const pitch = await screen.findByLabelText('Pitch · 俯仰');
+  page(); await screen.findByLabelText('标题'); fireEvent.click(screen.getByRole('tab', { name: '素材' })); const pitch = await screen.findByLabelText('Pitch · 俯仰');
   fireEvent.change(pitch, { target: { value: '22' } }); await screen.findByRole('button', { name: '放弃调整' });
   const dirty = new Event('beforeunload', { cancelable: true }); window.dispatchEvent(dirty); expect(dirty.defaultPrevented).toBe(true);
   fireEvent.click(screen.getByRole('button', { name: '放弃调整' }));
@@ -174,7 +177,7 @@ it('protects unsaved script mappings from refresh and clears the native guard wh
 
 it('updates the page tab title for the full ID and language, then restores the current localized base title', async () => {
   const view = render(<><LanguageBootstrap /><WorkDetail id={7} presentation="page" capabilities={{ can_open_folder: false, reason: '' }} onClose={close} onSaved={saved} notify={notify} /></>);
-  await screen.findByRole('heading', { name: 'S025_001', level: 1 });
+  await screen.findByRole('heading', { name: '已有标题', level: 1 });
   await waitFor(() => expect(document.title).toBe('S025_001 · Funscript 工作台'));
   act(() => setLanguage({ language: 'en', revision: 2 }));
   expect(document.title).toBe('S025_001 · Funscript Workbench');

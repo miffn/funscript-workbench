@@ -99,7 +99,7 @@ afterEach(async () => {
 });
 
 const card = (id = 7) => screen.findByRole('button', { name: `查看 S${String(id).padStart(3, '0')} 作品 ${id}` });
-const detailHeading = (id = 7) => screen.findByRole('heading', { level: 1, name: `S${String(id).padStart(3, '0')}` });
+const detailHeading = (id = 7) => screen.findByRole('heading', { level: 1, name: `作品 ${id}` });
 function latestInventoryParams() {
   const call = fetchMock.mock.calls.filter(([path]) => typeof path === 'string' && path.startsWith('/api/works?')).at(-1);
   return new URL(String(call?.[0]), 'http://localhost').searchParams;
@@ -120,7 +120,7 @@ async function filteredGallery() {
   fireEvent.click(screen.getByRole('button', { name: '组合筛选' }));
   fireEvent.click(screen.getByRole('button', { name: '作者 A' }));
   fireEvent.click(screen.getByLabelText('仅看异常'));
-  fireEvent.click(screen.getByRole('button', { name: '完成' }));
+  fireEvent.click(screen.getByRole('button', { name: '查看作品' }));
   await waitFor(() => {
     const params = latestInventoryParams();
     expect(params.get('q')).toBe('needle'); expect(params.get('status')).toBe('pending');
@@ -208,6 +208,8 @@ describe('unsaved work-page navigation', () => {
     const title = await screen.findByLabelText('标题');
     fireEvent.change(title, { target: { value: '未保存标题' } });
     fireEvent.change(screen.getByLabelText('备注'), { target: { value: '未保存备注' } });
+    fireEvent.click(screen.getByRole('tab', { name: '发布信息' }));
+    fireEvent.click(await screen.findByRole('button', { name: '编辑 ES 发布日期' }));
     fireEvent.change(screen.getByLabelText('ES 发布日期'), { target: { value: '2026-10-06' } });
     const leave = async () => {
       if (destination === 'browser') await traverse('back');
@@ -236,7 +238,8 @@ it('opens publication link icons as their existing popup without routing to the 
   render(<App />); await card();
   fireEvent.click(screen.getByRole('button', { name: '填写 ES 帖子链接 S007' }));
   await screen.findByLabelText('ES 帖子链接');
-  const dialog = screen.getByRole('dialog'); expect(within(dialog).getByRole('heading', { name: 'S007 · 发布链接' })).toBeTruthy();
+  const dialog = screen.getByRole('dialog'); expect(within(dialog).getByRole('heading', { name: '快速编辑发布信息' })).toBeTruthy();
+  expect(within(dialog).getByText('S007 · 作品 7')).toBeTruthy();
   expect(window.location.hash).toBe('#/inventory'); expect(document.querySelector('article.detail-page')).toBeNull();
   expect(screen.getByRole('heading', { level: 1, name: '脚本库存' })).toBeTruthy();
 });

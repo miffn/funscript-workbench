@@ -16,7 +16,7 @@ beforeEach(() => {
   window.location.hash = '#/inventory';
   localStorage.clear();
   saved.mockClear(); close.mockClear(); patchWork = work;
-  fetchMock = vi.fn((url: string, init?: RequestInit) => response(init?.method === 'PATCH' ? patchWork : url.startsWith('/api/works?') ? { items: [work], total: 1, page: 1, page_size: 24, stats: { total: 1, pending: 1, published: 0, issues: 0 }, last_scan: null } : url === '/api/works/7' ? work : url.endsWith('/preview-matching') ? { work_id: 7, video_asset_id: null, mode: 'auto', revision: 0, script_asset_ids: {}, issues: [], videos: [], scripts: [], job: null, source_changed: false } : url.endsWith('/preview') ? { job: null, files: [], output_dir: '', windows_path: '' } : url === '/api/capabilities' ? { can_open_folder: false, reason: '' } : { items: [] }));
+  fetchMock = vi.fn((url: string, init?: RequestInit) => url.endsWith('/links') ? response({ ...patchWork, work_id: 7, links: patchWork.links || { es: '', patreon: '', video: '', script: '' }, links_revision: 1, publication_revision: 'revision' }) : response(init?.method === 'PATCH' ? patchWork : url.startsWith('/api/works?') ? { items: [work], total: 1, page: 1, page_size: 24, stats: { total: 1, pending: 1, published: 0, issues: 0 }, last_scan: null } : url === '/api/works/7' ? patchWork : url.endsWith('/preview-matching') ? { work_id: 7, video_asset_id: null, mode: 'auto', revision: 0, script_asset_ids: {}, issues: [], videos: [], scripts: [], job: null, source_changed: false } : url.endsWith('/preview') ? { job: null, files: [], output_dir: '', windows_path: '' } : url === '/api/capabilities' ? { can_open_folder: false, reason: '' } : { items: [] }));
   vi.stubGlobal('fetch', fetchMock);
   Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value: function(this: HTMLDialogElement) { this.open = true; } });
 });
@@ -50,29 +50,36 @@ it('displays both dates in every inventory mode without duplicating the ID headi
 
 it('persists edited dates and allows clearing one without affecting the other', async () => {
   render(<WorkDetail id={7} capabilities={{ can_open_folder: false, reason: '' }} onClose={close} onSaved={saved} notify={vi.fn()} />);
-  const es = await screen.findByLabelText('ES 发布日期');
+  await screen.findByLabelText('标题');
+  fireEvent.click(screen.getByRole('tab', { name: '发布信息' }));
+  fireEvent.click(await screen.findByRole('button', { name: '编辑 ES 发布日期' }));
+  const es = screen.getByLabelText('ES 发布日期');
+  fireEvent.click(screen.getByRole('button', { name: '编辑 Patreon 发布日期' }));
   const patreon = screen.getByLabelText('Patreon 发布日期');
   expect((es as HTMLInputElement).value).toBe('');
   expect((patreon as HTMLInputElement).value).toBe('2026-09-29');
   fireEvent.change(es, { target: { value: '2026-09-30' } });
   fireEvent.change(patreon, { target: { value: '' } });
   patchWork = { ...work, es_published_date: '2026-09-30', patreon_published_date: null };
-  fireEvent.click(screen.getByRole('button', { name: '保存信息' }));
+  fireEvent.click(screen.getByRole('button', { name: '保存链接' }));
   await screen.findByLabelText('ES · 待发布 · 2026-09-30');
   expect(screen.getByLabelText('ES · 待发布 · 2026-09-30').querySelector('time')?.getAttribute('datetime')).toBe('2026-09-30');
   expect(screen.getByLabelText('Patreon · 待发布').querySelector('time')).toBeNull();
-  expect(JSON.parse(fetchMock.mock.calls.find(([, init]) => init?.method === 'PATCH')![1].body)).toEqual({ title: 'S069', notes: '', es_published_date: '2026-09-30', patreon_published_date: null });
+  expect(JSON.parse(fetchMock.mock.calls.find(([, init]) => init?.method === 'PATCH')![1].body)).toEqual({ links: {}, expected_revision: 1, expected_publication_revision: 'revision', es_published_date: '2026-09-30', patreon_published_date: null });
   expect(saved).toHaveBeenCalledOnce();
-  expect((screen.getByRole('button', { name: '保存信息' }) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByRole('button', { name: '保存链接' }) as HTMLButtonElement).disabled).toBe(true);
 });
 
 it('preserves unsaved dates during publication toggles and confirms before discarding', async () => {
   render(<WorkDetail id={7} capabilities={{ can_open_folder: false, reason: '' }} onClose={close} onSaved={saved} notify={vi.fn()} />);
-  const es = await screen.findByLabelText('ES 发布日期');
+  await screen.findByLabelText('标题');
+  fireEvent.click(screen.getByRole('tab', { name: '发布信息' }));
+  fireEvent.click(await screen.findByRole('button', { name: '编辑 ES 发布日期' }));
+  const es = screen.getByLabelText('ES 发布日期');
   fireEvent.change(es, { target: { value: '2026-09-28' } });
   patchWork = { ...work, es_published: true };
-  fireEvent.click(screen.getByRole('button', { name: '标记 ES 已发布' }));
-  await screen.findByRole('button', { name: '将 ES 改为未发布' });
+  fireEvent.click(screen.getByRole('button', { name: '切换 ES 发布状态' }));
+  expect(screen.getByRole('button', { name: '切换 ES 发布状态' }).getAttribute('aria-pressed')).toBe('true');
   expect((es as HTMLInputElement).value).toBe('2026-09-28');
   fireEvent.click(screen.getByRole('button', { name: '关闭作品详情' }));
   expect(screen.getByText('有尚未保存的修改')).toBeTruthy();

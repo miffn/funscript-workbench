@@ -77,6 +77,17 @@ it('switches to the agenda and edits the same persisted platform record', async 
   expect(screen.getByRole('group', { name: '2026-10 月历' })).toBeTruthy();
 });
 
+it('uses platform segments and schedules a pending platform from the day sidebar', async () => {
+  renderCalendar(); await ready();
+  fireEvent.click(within(screen.getByRole('group', { name: '日历平台筛选' })).getByRole('button', { name: 'Patreon' }));
+  expect(screen.queryByRole('button', { name: '安排 S001 ES' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '安排 S001 Patreon' }));
+  await screen.findByRole('button', { name: 'S001 Patreon 计划 2026-10-03' });
+  expect(JSON.parse(posts()[0][1].body)).toMatchObject({ work_id: 1, platforms: ['patreon'], mode: 'planned', date: '2026-10-03' });
+  expect(works[0].patreon_published).toBe(false);
+  expect(works[0].patreon_published_date).toBeNull();
+});
+
 it('searches and schedules an unnumbered folder work using its name and stable work ID', async () => {
   works.push(work(4, { script_id: null, title: '普通文件夹' }));
   renderCalendar(); await ready();
@@ -101,8 +112,8 @@ it('shows one work record for both platforms and plans/actual dates on the same 
   expect(within(day as HTMLElement).getByText('1 条记录')).toBeTruthy();
   expect(day.querySelector('.calendar-mobile-count')?.textContent).toBe('1');
   expect(document.querySelector('.calendar-day-heading > span')?.textContent).toBe('1 条');
-  fireEvent.change(screen.getByLabelText('平台筛选'), { target: { value: 'patreon' } });
-  fireEvent.change(screen.getByLabelText('记录筛选'), { target: { value: 'planned' } });
+  fireEvent.click(within(screen.getByRole('group', { name: '日历平台筛选' })).getByRole('button', { name: 'Patreon' }));
+  fireEvent.click(within(screen.getByRole('group', { name: '日历日期类型' })).getByRole('button', { name: '计划' }));
   expect(within(screen.getByRole('group', { name: 'S002 当日记录' })).getAllByRole('button')).toHaveLength(1);
 });
 
@@ -209,7 +220,7 @@ it('blocks conflicting undo, keeps current data and explains the conflict', asyn
 
 it('filters both platform and record kind, retains search through month navigation, and returns to today', async () => {
   renderCalendar(); await ready();
-  fireEvent.change(screen.getByLabelText('平台筛选'), { target: { value: 'patreon' } }); fireEvent.change(screen.getByLabelText('记录筛选'), { target: { value: 'planned' } });
+  fireEvent.click(within(screen.getByRole('group', { name: '日历平台筛选' })).getByRole('button', { name: 'Patreon' })); fireEvent.click(within(screen.getByRole('group', { name: '日历日期类型' })).getByRole('button', { name: '计划' }));
   expect(screen.queryByRole('button', { name: 'S002 ES 计划 2026-10-03' })).toBeNull();
   expect(screen.queryByRole('button', { name: 'S003 Patreon 已发布 2026-10-06' })).toBeNull();
   expect(screen.getByRole('button', { name: 'S002 Patreon 计划 2026-10-03' })).toBeTruthy();

@@ -3,7 +3,7 @@ import { useI18n, translate } from './i18n';
 import { useEffect, useRef, useState } from 'react';
 import { Archive, Check, ImagePlus, LoaderCircle, Trash2, UserRound } from 'lucide-react';
 
-export type ProfileData = { name: string; bio: string; avatar: string | null; revision: number };
+export type ProfileData = { name: string; bio: string; avatar: string | null; revision: number; es_home?: string; patreon_home?: string };
 const MAX_AVATAR_BYTES = 300_000;
 const AVATAR_MIMES = ['image/png', 'image/jpeg', 'image/webp'];
 

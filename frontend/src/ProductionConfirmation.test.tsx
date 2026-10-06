@@ -13,6 +13,13 @@ vi.mock('./PreviewSection', () => ({
   </div>,
 }));
 
+
+vi.mock('./WorkLinks', () => ({
+  WorkReleasePanel: ({ work, onDirtyChange }: { work: Work; onDirtyChange: (dirty: boolean) => void }) => <div>
+    <input aria-label="ES 发布日期" defaultValue={work.es_published_date || ''} onChange={() => onDirtyChange(true)} />
+    <input aria-label="Patreon 发布日期" defaultValue={work.patreon_published_date || ''} onChange={() => onDirtyChange(true)} />
+  </div>,
+}));
 const fixture: Work = {
   id: 7, script_id: 'S070', title: '原有标题', status: 'pending', notes: '原有备注',
   video_count: 1, script_count: 2, cover_url: null, issues: [], updated_at: '2026-10-05T06:00:00Z',
@@ -46,6 +53,7 @@ describe('manual production completion', () => {
     expect(screen.getByText('待确认制作完成')).toBeTruthy();
     expect(screen.getByText('尚无可用脚本，请添加脚本后扫描或重新匹配文件。')).toBeTruthy();
     expect(confirmButton().disabled).toBe(true);
+    fireEvent.click(screen.getByRole('tab', { name: '资料与标签' }));
     fireEvent.click(confirmButton());
     expect(confirmRequests()).toHaveLength(0);
   });
@@ -59,8 +67,10 @@ describe('manual production completion', () => {
     expect(confirmRequests()).toHaveLength(0);
     fireEvent.change(screen.getByLabelText('标题'), { target: { value: '未保存的新标题' } });
     fireEvent.change(screen.getByLabelText('备注'), { target: { value: '未保存的新备注' } });
+    fireEvent.click(screen.getByRole('tab', { name: '发布信息' }));
     fireEvent.change(screen.getByLabelText('ES 发布日期'), { target: { value: '2026-09-29' } });
     fireEvent.change(screen.getByLabelText('Patreon 发布日期'), { target: { value: '2026-09-30' } });
+    fireEvent.click(screen.getByRole('tab', { name: '资料与标签' }));
     fireEvent.click(confirmButton());
     const busy = screen.getByRole('button', { name: '正在确认制作完成' }) as HTMLButtonElement;
     expect(busy.disabled).toBe(true); fireEvent.click(busy);
@@ -102,11 +112,13 @@ describe('manual production completion', () => {
     detail(); await screen.findByLabelText('备注');
     await waitFor(() => expect(confirmButton().disabled).toBe(false));
     fireEvent.change(screen.getByLabelText('备注'), { target: { value: '保留这份备注' } });
+    fireEvent.click(screen.getByRole('tab', { name: '资料与标签' }));
     fireEvent.click(confirmButton());
     await screen.findByText('制作完成未确认：制作状态已变化，请刷新后重试。');
     expect(saved).not.toHaveBeenCalled(); expect(notify).not.toHaveBeenCalled();
     expect((screen.getByLabelText('备注') as HTMLTextAreaElement).value).toBe('保留这份备注');
     expect(confirmButton().disabled).toBe(false);
+    fireEvent.click(screen.getByRole('tab', { name: '资料与标签' }));
     fireEvent.click(confirmButton()); await waitFor(() => expect(saved).toHaveBeenCalledOnce());
   });
 
@@ -116,7 +128,9 @@ describe('manual production completion', () => {
     expect(screen.queryByRole('heading', { name: '制作确认' })).toBeNull();
     fireEvent.change(screen.getByLabelText('备注'), { target: { value: '仍在编辑' } });
     server = { ...server, script_count: 0, production_required: true, production_confirmed_at: null, production_revision: 5 };
+    fireEvent.click(screen.getByRole('tab', { name: '素材' }));
     fireEvent.click(screen.getByRole('button', { name: '测试刷新素材' }));
+    fireEvent.click(screen.getByRole('tab', { name: '资料与标签' }));
     await screen.findByRole('heading', { name: '制作确认' });
     expect(confirmButton().disabled).toBe(true);
     expect((screen.getByLabelText('备注') as HTMLTextAreaElement).value).toBe('仍在编辑');
@@ -126,7 +140,9 @@ describe('manual production completion', () => {
   it('blocks confirmation while script assignments have unsaved edits', async () => {
     detail(); await screen.findByLabelText('备注');
     await waitFor(() => expect(confirmButton().disabled).toBe(false));
+    fireEvent.click(screen.getByRole('tab', { name: '素材' }));
     fireEvent.click(screen.getByRole('button', { name: '测试修改对应关系' }));
+    fireEvent.click(screen.getByRole('tab', { name: '资料与标签' }));
     expect(confirmButton().disabled).toBe(true);
     expect(screen.getByText('请先保存或放弃尚未保存的脚本对应关系。')).toBeTruthy();
     expect(confirmRequests()).toHaveLength(0);

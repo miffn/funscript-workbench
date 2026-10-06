@@ -25,7 +25,7 @@ const inlineUrl = (url: string) => {
   return `${separator < 0 ? resource : resource.slice(0, separator)}?${query}${fragment ? `#${fragment}` : ''}`;
 };
 
-function InlinePreview({ file, ordinal, onClose }: { file: PreviewFile; ordinal: number; onClose: () => void }) {
+export function InlinePreview({ file, ordinal, onClose }: { file: PreviewFile; ordinal: number; onClose: () => void }) {
   const { t } = useI18n();
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
@@ -53,9 +53,10 @@ function InlinePreview({ file, ordinal, onClose }: { file: PreviewFile; ordinal:
   </section>;
 }
 
-export function PreviewSection({ work, capabilities, onSourcesChanged, onDirtyChange }: { work: Work; capabilities: Capabilities; onSourcesChanged?: () => Promise<void> | void; onDirtyChange?: (dirty: boolean) => void }) {
+export function PreviewSection({ work, capabilities, onSourcesChanged, onDirtyChange, onPreviewStateChanged }: { work: Work; capabilities: Capabilities; onSourcesChanged?: () => Promise<void> | void; onDirtyChange?: (dirty: boolean) => void; onPreviewStateChanged?: (state: PreviewState) => void }) {
   const { t } = useI18n();
   const [data, setData] = useState<PreviewState | null>(null);
+  useEffect(() => { if (data) onPreviewStateChanged?.(data); }, [data, onPreviewStateChanged]);
   const [matching, setMatching] = useState<PreviewMatching | null>(null);
   const [draft, setDraft] = useState<Partial<Record<PreviewAxis, number>>>({});
   const [loadError, setLoadError] = useState('');

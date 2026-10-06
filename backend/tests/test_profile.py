@@ -43,7 +43,7 @@ def test_defaults_then_full_profile_persists_in_sqlite_and_other_settings_remain
     data = payload(name="  工作台姓名  ", bio="  简介  ", avatar=avatar())
     result = client.put("/api/profile", json=data)
     assert result.status_code == 200
-    expected = {"name": "工作台姓名", "bio": "简介", "avatar": data["avatar"], "revision": 1}
+    expected = {**DEFAULT_PROFILE, "name": "工作台姓名", "bio": "简介", "avatar": data["avatar"], "revision": 1}
     assert result.json() == expected
     assert client_for(Store(store.path.parent)).get("/api/profile").json() == expected
     with store.connection() as db:
@@ -92,3 +92,26 @@ def test_revision_prevents_stale_write_and_concurrent_updates(profile):
     assert client.get("/api/profile").json() == winner
     assert client.put("/api/profile", json=payload()).status_code == 409
     assert client.get("/api/profile").json() == winner
+
+
+def test_platform_homes_persist_and_identity_only_clients_preserve_them(profile):
+    store, client = profile
+    saved = client.put('/api/profile', json=payload(es_home=' https://eroscripts.com/u/example ', patreon_home='https://www.patreon.com/example'))
+    assert saved.status_code == 200
+    assert saved.json()['es_home'] == 'https://eroscripts.com/u/example'
+    identity = client.put('/api/profile', json=payload(name='Changed identity', expected_revision=1))
+    assert identity.status_code == 200
+    assert identity.json()['es_home'] == saved.json()['es_home']
+    assert identity.json()['patreon_home'] == saved.json()['patreon_home']
+    assert client_for(Store(store.path.parent)).get('/api/profile').json() == identity.json()
+    cleared = client.put('/api/profile', json=payload(es_home='', expected_revision=2))
+    assert cleared.json()['es_home'] == ''
+    assert cleared.json()['patreon_home'] == saved.json()['patreon_home']
+    assert client.put('/api/profile', json=payload(es_home='https://example.test/stale', expected_revision=2)).status_code == 409
+    assert client.get('/api/profile').json() == cleared.json()
+
+
+def test_unsafe_platform_home_does_not_change_profile(profile):
+    _, client = profile
+    assert client.put('/api/profile', json=payload(es_home='javascript:alert(1)')).status_code == 422
+    assert client.get('/api/profile').json() == DEFAULT_PROFILE

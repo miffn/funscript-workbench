@@ -1,4 +1,10 @@
 export const design: Record<string, string> = {
+  '平台主页': 'Platform profiles', '未添加': 'Not added', '编辑姓名': 'Edit name', '编辑简介': 'Edit bio',
+  '编辑 {0} 主页': 'Edit {0} profile', '添加 {0} 主页': 'Add {0} profile', '{0} 主页': '{0} profile',
+  '加载最新资料': 'Load latest profile', '扫描目录说明': 'About scan directories', '收起新增目录': 'Hide new directory',
+  '随系统切换': 'Follow the system', '明亮清晰': 'Bright and clear', '降低环境亮度': 'Dim appearance',
+  '条记录': 'records', '最新任务优先': 'Latest tasks first', '任务 / 处理范围': 'Task / scope', '开始 / 耗时': 'Started / elapsed',
+  '{0} 个目录': '{0} directories', '{0} 秒': '{0} sec', '{0} 分钟': '{0} min',
   '个人中心': 'Profile', '个人工作台': 'Personal workspace', '个人资料': 'Personal profile',
   '返回个人中心': 'Back to profile', '返回发布日历': 'Back to calendar', '返回待处理': 'Back to pending issues',
   '返回任务记录': 'Back to task records', '返回标签管理': 'Back to tag management',

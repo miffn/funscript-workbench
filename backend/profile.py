@@ -12,7 +12,7 @@ from PIL import Image, UnidentifiedImageError
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, field_validator
 
 PROFILE_KEY = "workspace_profile"
-DEFAULT_PROFILE = {"name": "Funscript", "bio": "脚本工作台", "avatar": None, "revision": 0}
+DEFAULT_PROFILE = {"name": "Funscript", "bio": "脚本工作台", "avatar": None, "es_home": "", "patreon_home": "", "revision": 0}
 MAX_AVATAR_DATA_URL = 400 * 1024
 MAX_AVATAR_PIXELS = 4_000_000
 AVATAR_TYPES = {"image/png": "PNG", "image/jpeg": "JPEG", "image/webp": "WEBP"}
@@ -24,6 +24,14 @@ class ProfileUpdate(BaseModel):
     bio: StrictStr = Field(max_length=160)
     avatar: StrictStr | None = Field(max_length=MAX_AVATAR_DATA_URL)
     expected_revision: StrictInt = Field(ge=0)
+    es_home: StrictStr = Field(default="", max_length=4096)
+    patreon_home: StrictStr = Field(default="", max_length=4096)
+
+    @field_validator("es_home", "patreon_home")
+    @classmethod
+    def validate_home(cls, value: str):
+        from .work_links import validate_link
+        return validate_link(value)
 
     @field_validator("name", "bio")
     @classmethod
@@ -60,7 +68,7 @@ class ProfileUpdate(BaseModel):
 
 def read_profile(db) -> dict:
     row = db.execute("SELECT value FROM settings WHERE key=?", (PROFILE_KEY,)).fetchone()
-    return json.loads(row["value"]) if row else dict(DEFAULT_PROFILE)
+    return dict(DEFAULT_PROFILE) | json.loads(row["value"]) if row else dict(DEFAULT_PROFILE)
 
 
 def register_profile_routes(app: FastAPI, store) -> None:
@@ -76,7 +84,11 @@ def register_profile_routes(app: FastAPI, store) -> None:
             current = read_profile(db)
             if current["revision"] != update.expected_revision:
                 raise HTTPException(409, "工作台资料已被其他页面修改，请重新加载资料后再保存；当前输入已保留")
-            saved = {"name": update.name, "bio": update.bio, "avatar": update.avatar, "revision": current["revision"] + 1}
+            saved = {**current, "name": update.name, "bio": update.bio, "avatar": update.avatar, "revision": current["revision"] + 1}
+            # Existing clients that only edit the identity must preserve platform homes.
+            for field in ("es_home", "patreon_home"):
+                if field in update.model_fields_set:
+                    saved[field] = getattr(update, field)
             db.execute("INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                        (PROFILE_KEY, json.dumps(saved, ensure_ascii=False, separators=(",", ":"))))
             return saved

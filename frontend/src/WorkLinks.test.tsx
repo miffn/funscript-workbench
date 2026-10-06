@@ -19,12 +19,12 @@ function editor(onSaved = vi.fn(), onClose = vi.fn()) {
   render(<WorkLinkEditor work={work} initialKind="video" onSaved={onSaved} onClose={onClose} />); return { onSaved, onClose };
 }
 async function loadedInput(label: string) {
-  await screen.findByLabelText(label);
+  await screen.findByLabelText('视频链接');
   await waitFor(() => {
     expect(screen.queryByText('正在读取发布链接')).toBeNull();
-    expect((screen.getByLabelText('Patreon 文章链接') as HTMLInputElement).value).toBe(current.links.patreon);
     expect(document.activeElement).toBe(screen.getByLabelText('视频链接'));
   });
+  if (label !== '视频链接') fireEvent.click(screen.getByRole('button', { name: `编辑${label}` }));
   return screen.getByLabelText(label);
 }
 describe('inventory link editing', () => {
@@ -122,7 +122,7 @@ describe('inventory link editing', () => {
     const { container } = render(<App />);
     fireEvent.click(await screen.findByRole('button', { name: '填写 视频链接 S058' }));
     await screen.findByLabelText('视频链接');
-    expect(screen.getByRole('dialog', { name: 'S058 · 发布链接' })).toBeTruthy();
+    expect(screen.getByRole('dialog', { name: '快速编辑发布信息' })).toBeTruthy();
     expect(fetchMock.mock.calls.some(([url]) => url === '/api/works/7')).toBe(false);
     expect(container.querySelector('button button')).toBeNull();
     expect(screen.getByRole('button', { name: '查看 S058 测试作品' })).toBeTruthy();

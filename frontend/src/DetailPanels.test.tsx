@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { Cover, JobsPage, PublicationBadges } from './components';
 import type { Job, Work } from './api';
 
@@ -42,10 +42,10 @@ it('filters real job states and types and reveals server results and errors on e
   expect(screen.getByText('片段')).toBeTruthy();
   expect(screen.getByText('2', { selector: '.job-results strong' })).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: /^全部\s*3$/ }));
-  fireEvent.change(screen.getByLabelText('任务类型'), { target: { value: 'scan' } });
+  fireEvent.click(within(screen.getByRole('group', { name: '任务类型' })).getByRole('button', { name: '库存扫描' }));
   expect(screen.getByRole('button', { name: /库存扫描 #1/ })).toBeTruthy();
   expect(screen.queryByRole('button', { name: /预览生成 #2/ })).toBeNull();
-  fireEvent.change(screen.getByLabelText('任务类型'), { target: { value: 'all' } });
+  fireEvent.click(screen.getByRole('button', { name: '全部类型' }));
   fireEvent.change(screen.getByLabelText('搜索任务'), { target: { value: 'S070' } });
   expect(screen.getByRole('button', { name: /预览生成 #2/ })).toBeTruthy();
   expect(screen.queryByRole('button', { name: /库存扫描 #1/ })).toBeNull();

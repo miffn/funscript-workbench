@@ -61,6 +61,19 @@ describe('consistent compact tags', () => {
 });
 
 describe('direct tag transfers', () => {
+  it('undoes the most recent transfer through the current server revision', async () => {
+    binding.tags = [catalog[0]];
+    render(<WorkTagEditor work={work} onClose={vi.fn()} onSaved={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: '作者 B' }));
+    await waitFor(() => expect(binding.tags_revision).toBe(3));
+    fireEvent.click(screen.getByRole('button', { name: '撤销' }));
+    await waitFor(() => expect(binding.tags_revision).toBe(4));
+    expect(binding.tags.map(tag => tag.id)).toEqual([1]);
+    expect(screen.queryByRole('button', { name: '撤销' })).toBeNull();
+    const writes = fetchMock.mock.calls.filter(([, options]) => options?.method === 'PUT');
+    expect(JSON.parse(writes.at(-1)![1].body)).toEqual({ tag_ids: [1], expected_revision: 3 });
+  });
+
   it('blocks duplicate transfers and closing while a server write is pending', async () => {
     let finish: (value: Response) => void = () => {};
     const originalFetch = fetchMock.getMockImplementation() as (url: string, init?: RequestInit) => Promise<Response>;
@@ -172,18 +185,45 @@ describe('direct tag transfers', () => {
   });
 });
 describe('shared author tag management', () => {
+  it('uses the sample category rail and table with inline editing and real linked works', async () => {
+    const openWork = vi.fn();
+    render(<TagsPage revision={0} onChanged={vi.fn()} onOpenWork={openWork} />);
+    const edit = await screen.findByRole('button', { name: '编辑标签 作者 A' });
+    expect(document.querySelector('.tag-manager-layout>.tag-manager-categories')).toBeTruthy();
+    expect(screen.getByText('作品数')).toBeTruthy();
+    fireEvent.click(edit);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(document.querySelector('.tag-catalog-editor .tag-catalog-edit-grid')).toBeTruthy();
+    const related = await screen.findByRole('button', { name: /S025_001 · 作品标题/ });
+    fireEvent.click(related); expect(openWork).toHaveBeenCalledWith(7);
+    expect(fetchMock.mock.calls.some(([url]) => url === '/api/works?tag_id=1&page=1&page_size=6')).toBe(true);
+  });
+
+  it('keeps an inline draft until save or cancellation before switching categories', async () => {
+    render(<TagsPage revision={0} onChanged={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: '编辑标签 作者 A' }));
+    fireEvent.change(screen.getByLabelText('名称'), { target: { value: '未保存名称' } });
+    const category = within(screen.getByRole('navigation', { name: '标签类别' })).getByRole('button', { name: '视频类型 2' });
+    expect((category as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(category);
+    expect((screen.getByLabelText('名称') as HTMLInputElement).value).toBe('未保存名称');
+    fireEvent.click(screen.getByRole('button', { name: '取消' }));
+    expect((category as HTMLButtonElement).disabled).toBe(false);
+  });
+
   it('keeps automatic duration management read-only and excludes it from new tag categories', async () => {
     catalog.push(makeTag(12, 'duration', '18 分钟'));
     render(<TagsPage revision={0} onChanged={vi.fn()} />);
     await screen.findByRole('button', { name: '编辑标签 作者 A' });
     const categoryNavigation = screen.getByRole('navigation', { name: '标签类别' });
     fireEvent.click(within(categoryNavigation).getByRole('button', { name: '时间 1' }));
+    fireEvent.click(screen.getByRole('button', { name: '选择标签 18 分钟' }));
     expect(screen.getByText('自动更新 · 只读')).toBeTruthy();
     expect(screen.queryByRole('button', { name: '创建标签' })).toBeNull();
     expect(screen.queryByRole('button', { name: '编辑标签 18 分钟' })).toBeNull();
     fireEvent.click(within(categoryNavigation).getByRole('button', { name: '作者 2' }));
     fireEvent.click(screen.getByRole('button', { name: '创建标签' }));
-    expect(within(screen.getByLabelText('类别')).queryByRole('option', { name: '时间' })).toBeNull();
+    expect(within(screen.getByRole('group', { name: '类别' })).queryByRole('button', { name: '时间' })).toBeNull();
   });
 
   it('shows support conflicts without picking a URL, and saves an explicitly selected URL with its tag revision', async () => {
@@ -192,7 +232,7 @@ describe('shared author tag management', () => {
     const changed = vi.fn(); render(<TagsPage revision={0} onChanged={changed} />);
     await screen.findByText('最近一次历史资料导入'); expect(screen.getByText('58')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '编辑标签 作者 A' }));
-    expect((screen.getByLabelText('支持地址状态') as HTMLSelectElement).value).toBe('unknown');
+    expect(screen.getByRole('button', { name: '未填写 / 待确认' }).getAttribute('aria-pressed')).toBe('true');
     expect(screen.queryByLabelText('支持作者 URL')).toBeNull();
     fireEvent.click(screen.getAllByRole('button', { name: '使用此地址' })[1]);
     expect((screen.getByLabelText('支持作者 URL') as HTMLInputElement).value).toBe('https://two.example/creator');
@@ -205,7 +245,7 @@ describe('shared author tag management', () => {
     render(<TagsPage revision={0} onChanged={vi.fn()} />); await screen.findByRole('button', { name: '编辑标签 作者 A' });
     fireEvent.click(screen.getByRole('button', { name: '编辑标签 作者 A' }));
     fireEvent.change(screen.getByLabelText('名称'), { target: { value: '作者新名称' } });
-    fireEvent.change(screen.getByLabelText('支持地址状态'), { target: { value: 'url' } });
+    fireEvent.click(screen.getByRole('button', { name: '已有支持地址' }));
     fireEvent.change(screen.getByLabelText('支持作者 URL'), { target: { value: 'https://name:secret@example.com/' } });
     fireEvent.click(screen.getByRole('button', { name: '保存资料' })); await screen.findByText(/请输入有效的 http/);
     expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'PATCH')).toBe(false);
@@ -219,7 +259,7 @@ describe('shared author tag management', () => {
     const changed = vi.fn(); render(<TagsPage revision={0} onChanged={changed} />); await screen.findByRole('button', { name: '编辑标签 作者 A' });
     fireEvent.click(screen.getByRole('button', { name: '创建标签' }));
     fireEvent.change(screen.getByLabelText('名称'), { target: { value: '新作者' } });
-    fireEvent.change(screen.getByLabelText('支持地址状态'), { target: { value: 'none' } });
+    fireEvent.click(screen.getByRole('button', { name: '明确无支持地址' }));
     fireEvent.click(screen.getAllByRole('button', { name: '创建标签' })[1]);
     await waitFor(() => expect(changed).toHaveBeenCalledOnce());
     const [, init] = fetchMock.mock.calls.find(([, init]) => init?.method === 'POST')!;

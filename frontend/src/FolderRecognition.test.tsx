@@ -33,6 +33,14 @@ beforeEach(() => {
       source = { ...source, items: [], total: 0 };
       return response({ candidate_id: 8, action: body.action, work: current });
     }
+    if (url.endsWith('/links')) {
+      if (init?.method === 'PATCH') {
+        const { links, expected_revision: _revision, expected_publication_revision: _publication, ...fields } = JSON.parse(String(init.body));
+        current = { ...current, ...fields, links: { ...current.links!, ...links } };
+        if (fields.es_published && !current.es_published_date) current.es_published_date = '2026-10-06';
+      }
+      return response({ ...current, work_id: current.id, links_revision: 1, publication_revision: 'revision' });
+    }
     if (url === '/api/jobs') return response({ items: [] });
     if (url.endsWith('/preview')) return response({ job: null, files: [], output_dir: '', windows_path: '', stale: false });
     if (url.endsWith('/preview-matching')) return response({ work_id: 7, video_asset_id: null, mode: 'auto', revision: 0, script_asset_ids: {}, issues: [], videos: [], scripts: [], job: null, source_changed: false });
@@ -137,13 +145,19 @@ it('keeps production and both platform operations available and resets only prod
   detail(); await screen.findByLabelText('备注');
   const manager = screen.getByRole('heading', { name: '状态管理' }).closest('section')!;
   expect(within(manager).getByRole('button', { name: '退回待制作' })).toBeTruthy();
-  const publication = screen.getByRole('heading', { name: '发布信息' }).closest('section')!;
-  expect(within(publication).getByRole('button', { name: '将 ES 改为未发布' })).toBeTruthy();
-  expect(within(publication).getByRole('button', { name: '将 Patreon 改为未发布' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('tab', { name: '发布信息' }));
+  await screen.findByRole('button', { name: '切换 ES 发布状态' });
+  const publication = screen.getByRole('tabpanel');
+  expect(within(publication).getByRole('button', { name: '切换 ES 发布状态' })).toBeTruthy();
+  expect(within(publication).getByRole('button', { name: '切换 Patreon 发布状态' })).toBeTruthy();
+  fireEvent.click(screen.getByRole('tab', { name: '资料与标签' }));
   await waitFor(() => expect((screen.getByRole('button', { name: '退回待制作' }) as HTMLButtonElement).disabled).toBe(false));
   fireEvent.change(screen.getByLabelText('标题'), { target: { value: '未保存标题' } });
   fireEvent.change(screen.getByLabelText('备注'), { target: { value: '未保存备注' } });
+  fireEvent.click(screen.getByRole('tab', { name: '发布信息' }));
+  fireEvent.click(await screen.findByRole('button', { name: '编辑 ES 发布日期' }));
   fireEvent.change(screen.getByLabelText('ES 发布日期'), { target: { value: '2026-09-28' } });
+  fireEvent.click(screen.getByRole('tab', { name: '资料与标签' }));
   fireEvent.click(screen.getByRole('button', { name: '退回待制作' }));
   await screen.findByRole('button', { name: '确认制作完成' });
   expect(JSON.parse(String(posts()[0][1]?.body))).toEqual({ expected_revision: 4 });
@@ -155,6 +169,7 @@ it('keeps production and both platform operations available and resets only prod
 
 it('keeps confirmed production intact after a rejected reset and does not confirm a scriptless work', async () => {
   failure = 409; const view = detail(); await screen.findByLabelText('备注');
+  fireEvent.click(screen.getByRole('tab', { name: '资料与标签' }));
   await waitFor(() => expect((screen.getByRole('button', { name: '退回待制作' }) as HTMLButtonElement).disabled).toBe(false));
   fireEvent.click(screen.getByRole('button', { name: '退回待制作' }));
   await screen.findByText('制作状态未更新：制作确认状态已变化，请刷新作品后重试');
@@ -169,11 +184,12 @@ it('blocks repeated production resets and platform writes while the reset is pen
   const original = fetchMock.getMockImplementation()!;
   fetchMock.mockImplementation((url: string, init?: RequestInit) => url.endsWith('/production/reset') ? new Promise<Response>(resolve => { finish = resolve; }) : original(url, init));
   detail(); await screen.findByLabelText('备注');
+  fireEvent.click(screen.getByRole('tab', { name: '资料与标签' }));
   await waitFor(() => expect((screen.getByRole('button', { name: '退回待制作' }) as HTMLButtonElement).disabled).toBe(false));
   fireEvent.click(screen.getByRole('button', { name: '退回待制作' }));
   const busy = screen.getByRole('button', { name: '正在退回待制作' }) as HTMLButtonElement;
   expect(busy.disabled).toBe(true); fireEvent.click(busy);
-  expect((screen.getByRole('button', { name: '将 ES 改为未发布' }) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByRole('tab', { name: '发布信息' }) as HTMLButtonElement).disabled).toBe(true);
   expect((screen.getByRole('button', { name: '返回库存' }) as HTMLButtonElement).disabled).toBe(true);
   expect(posts()).toHaveLength(1);
   await act(async () => finish!(response({ ...current, production_required: true, production_revision: 5 })));
@@ -191,20 +207,29 @@ it('shows a folder title and missing-association guidance without inventing a Sc
 it('synchronizes a newly defaulted publication date and does not clear it when later saving notes', async () => {
   current = { ...current, status: 'pending', es_published: false, es_published_date: null }; detail(); await screen.findByLabelText('备注');
   fireEvent.change(screen.getByLabelText('备注'), { target: { value: '新备注' } });
-  fireEvent.click(screen.getByRole('button', { name: '标记 ES 已发布' }));
-  await screen.findByRole('button', { name: '将 ES 改为未发布' });
-  expect((screen.getByLabelText('ES 发布日期') as HTMLInputElement).value).toBe('2026-10-06');
+  fireEvent.click(screen.getByRole('tab', { name: '发布信息' }));
+  fireEvent.click(await screen.findByRole('button', { name: '切换 ES 发布状态' }));
+  fireEvent.click(screen.getByRole('button', { name: '保存链接' }));
+  await screen.findByLabelText(/^ES · 已发布/);
+  await waitFor(() => expect((screen.getByRole('tab', { name: '资料与标签' }) as HTMLButtonElement).disabled).toBe(false));
+  expect(screen.getByRole('button', { name: '编辑 ES 发布日期' }).textContent).toBe('2026-10-06');
+  fireEvent.click(screen.getByRole('tab', { name: '资料与标签' }));
   fireEvent.click(screen.getByRole('button', { name: '保存信息' })); await waitFor(() => expect(saved).toHaveBeenCalledTimes(2));
   const payload = JSON.parse(String(fetchMock.mock.calls.filter(([, init]) => init?.method === 'PATCH').at(-1)![1]?.body));
   expect(payload).toEqual({ title: '原有作品', notes: '新备注' });
   expect(current.es_published_date).toBe('2026-10-06');
 });
 
-it('retains an explicitly edited date draft when publication writes default another date', async () => {
-  current = { ...current, status: 'pending', es_published: false, es_published_date: null }; detail(); await screen.findByLabelText('ES 发布日期');
+it('preserves an explicitly entered actual date when publishing in the same atomic write', async () => {
+  current = { ...current, status: 'pending', es_published: false, es_published_date: null }; detail(); await screen.findByLabelText('标题');
+  fireEvent.click(screen.getByRole('tab', { name: '发布信息' }));
+  fireEvent.click(await screen.findByRole('button', { name: '编辑 ES 发布日期' }));
   fireEvent.change(screen.getByLabelText('ES 发布日期'), { target: { value: '2026-09-25' } });
-  fireEvent.click(screen.getByRole('button', { name: '标记 ES 已发布' }));
-  await screen.findByRole('button', { name: '将 ES 改为未发布' });
-  expect((screen.getByLabelText('ES 发布日期') as HTMLInputElement).value).toBe('2026-09-25');
-  expect(current.es_published_date).toBe('2026-10-06');
+  fireEvent.click(screen.getByRole('tab', { name: '发布信息' }));
+  fireEvent.click(await screen.findByRole('button', { name: '切换 ES 发布状态' }));
+  fireEvent.click(screen.getByRole('button', { name: '保存链接' }));
+  await screen.findByLabelText(/^ES · 已发布/);
+  await waitFor(() => expect((screen.getByRole('tab', { name: '资料与标签' }) as HTMLButtonElement).disabled).toBe(false));
+  expect(screen.getByRole('button', { name: '编辑 ES 发布日期' }).textContent).toBe('2026-09-25');
+  expect(current.es_published_date).toBe('2026-09-25');
 });

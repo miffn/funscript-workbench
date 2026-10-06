@@ -1,7 +1,7 @@
 import { workIdentity } from './api';
 import { translate as t, useI18n } from './i18n';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AudioLines, ArrowLeft, ArrowRight, ArrowDownWideNarrow, ArrowUpWideNarrow, Check, CheckCheck, CalendarDays, CircleAlert, Clock3, FilePenLine, FileText, Film, LayoutGrid, List, LoaderCircle, Moon, PanelLeftClose, PanelLeftOpen, RefreshCw, Search, Settings2, SlidersHorizontal, Sun, Tag as TagIcon, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, ArrowDownWideNarrow, ArrowUpWideNarrow, Check, CheckCheck, CalendarDays, CircleAlert, Clock3, FilePenLine, FileText, Film, LayoutGrid, List, LoaderCircle, Moon, PanelLeftClose, PanelLeftOpen, RefreshCw, Search, Settings2, SlidersHorizontal, Sun, Tag as TagIcon, X } from 'lucide-react';
 import { errorMessage, formatDate, isActiveJob, request } from './api';
 import type { Capabilities, Filter, Inventory, Job, Work, WorkLinkKind, WorkLinks, WorkTags } from './api';
 import { WorkLinkButtons, WorkLinkEditor } from './WorkLinks';
@@ -234,7 +234,6 @@ export default function App() {
   const changeSortDirection = (value: 'asc' | 'desc') => { setSortDirection(value); setNumber(1); };
   return <div className={`app-shell ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
     <a className="skip-link" href="#main-content" onClick={event => { event.preventDefault(); const main = document.getElementById('main-content'); main?.focus({ preventScroll: true }); main?.scrollIntoView({ block: 'start', behavior: 'auto' }); }}>{t("跳到主要内容")}</a>
-    <header className="app-topbar"><a className="app-wordmark" href="#/inventory" onClick={event => { event.preventDefault(); navigate('inventory'); }}><span><AudioLines size={22} aria-hidden="true" /></span>Funscript</a><span className="app-workspace-label">{t('我的工作空间')}</span></header>
     <aside className="sidebar" aria-label={t("工作台导航")}>
       <a className={`brand ${page === 'profile' ? 'active' : ''}`} href="#/profile" onClick={event => { event.preventDefault(); navigate('profile'); }} aria-label={t('个人中心')} title={`${profile.name} · ${t('个人中心')}`} aria-current={page === 'profile' ? 'page' : undefined}><div className="brand-mark">{profile.avatar ? <img src={profile.avatar} alt={t("{0}的头像", {"0": profile.name})} /> : <span>{profile.name.slice(0, 1).toUpperCase()}</span>}</div><div className="brand-text"><strong>{profile.name}</strong><small>{t('个人工作台')}</small></div></a>
       <div className="nav-section"><p className="section-label">{t("作品库")}</p><nav className="nav-list">
@@ -254,7 +253,7 @@ export default function App() {
     </aside>
     <main id="main-content" className="main-content" tabIndex={-1}>
       <div className="page-kicker"><span className="last-updated">{t("最近扫描 ·")}{formatDate(inventory?.last_scan?.at)}</span></div>
-      {page !== 'detail' && <header className="page-header"><div><h1 tabIndex={-1}>{title}</h1><p>{subtitle}</p></div><button className="button primary" onClick={() => void scan()} disabled={busy}>{busy ? <LoaderCircle size={17} className="spin" /> : <RefreshCw size={17} />}<span>{busy ? t("正在扫描") : t("立即扫描")}</span></button></header>}
+      {page !== 'detail' && <header className="page-header"><div><h1 tabIndex={-1}>{title}</h1><p>{subtitle}</p></div>{page === 'inventory' && <button className="button primary" onClick={() => void scan()} disabled={busy}>{busy ? <LoaderCircle size={17} className="spin" /> : <RefreshCw size={17} />}<span>{busy ? t("正在扫描") : t("立即扫描")}</span></button>}</header>}
       {notice && <div className={`notice ${notice.kind}`} role={notice.kind === 'error' ? 'alert' : 'status'}><span>{notice.kind === 'error' ? <CircleAlert size={18} /> : notice.kind === 'success' ? <Check size={18} /> : <RefreshCw size={18} />}{t(notice.message)}</span><button className="icon-button" aria-label={t("关闭提示")} onClick={() => setNotice(null)}><X size={17} /></button></div>}
       {currentJob && <div className="scan-banner" role="status"><LoaderCircle className="spin" size={16} /><span>{t("后台正在扫描素材并更新封面")}</span><button onClick={() => navigate('jobs')}>{t("查看进度")}<ArrowRight size={14} /></button></div>}
       {page === 'detail' && detailId !== null && <WorkDetail key={detailId} ref={detailGuard} presentation="page" backLabel={({ calendar: '返回发布日历', profile: '返回个人中心', issues: '返回待处理', jobs: '返回任务记录', tags: '返回标签管理' } as Partial<Record<Page, string>>)[returnPage] || '返回库存'} id={detailId} capabilities={capabilities} onClose={backToInventory} onSaved={() => setRevision(value => value + 1)} notify={notify} />}
@@ -271,15 +270,15 @@ export default function App() {
       </>}
       {page === 'calendar' && <ReleaseCalendar revision={revision} onSelect={openWork} onChanged={() => setRevision(value => value + 1)} />}
       {page === 'issues' && <IssuesPage revision={revision} onSelect={openWork} onChanged={() => setRevision(value => value + 1)} />}
-      {page === 'jobs' && <JobsPage revision={revision} />}
-      {page === 'settings' && <SettingsWorkbench capabilities={capabilities} revision={revision} theme={theme} onTheme={setTheme} view={view} onView={setView} spring={spring} onSpring={setSpring} reduceMotion={reduceMotion} onReduceMotion={setReduceMotion} sortPlatform={sortPlatform} onSortPlatform={changeSortPlatform} sortDirection={sortDirection} onSortDirection={changeSortDirection} />}
+      {page === 'jobs' && <JobsPage revision={revision} onSelect={openWork} />}
+      {page === 'settings' && <SettingsWorkbench capabilities={capabilities} revision={revision} theme={theme} onTheme={setTheme} view={view} onView={setView} spring={spring} onSpring={setSpring} reduceMotion={reduceMotion} onReduceMotion={setReduceMotion} sortPlatform={sortPlatform} onSortPlatform={changeSortPlatform} sortDirection={sortDirection} onSortDirection={changeSortDirection} onScan={() => void scan()} scanning={busy} />}
       {page === 'profile' && <PersonalPage profile={profile} loading={profileLoading} error={profileError} onRetry={() => setProfileRetry(value => value + 1)} onSaved={value => { setProfile(value); notify({ kind: 'success', message: t('工作台资料已保存') }); }} inventory={inventory} onNavigate={navigate} onSelect={openWork} />}
-      {page === 'tags' && <TagsPage revision={revision} onChanged={() => setRevision(value => value + 1)} />}
+      {page === 'tags' && <TagsPage revision={revision} onChanged={() => setRevision(value => value + 1)} onOpenWork={openWork} />}
       <footer className="page-footer"><span>{t("Funscript 工作台")}</span><span>{t("库存与状态保存在服务端")}</span></footer>
     </main>
     {selected !== null && <WorkDetail id={selected} capabilities={capabilities} onClose={() => setSelected(null)} onSaved={() => setRevision(value => value + 1)} notify={notify} />}
     {tagWork && <WorkTagEditor work={tagWork} onClose={() => setTagWork(null)} onSaved={tagsSaved} />}
     {linkWork && <WorkLinkEditor work={linkWork.work} initialKind={linkWork.kind} onClose={() => setLinkWork(null)} onSaved={linksSaved} />}
-    {filtersOpen && <InventoryFilters catalog={catalog} selected={tagIds} onChange={ids => { setTagIds(ids); setNumber(1); }} issuesOnly={issuesOnly} untaggedOnly={untaggedOnly} onIssuesChange={value => { setIssuesOnly(value); setNumber(1); }} onUntaggedChange={value => { setUntaggedOnly(value); setNumber(1); }} onClose={() => setFiltersOpen(false)} />}
+    {filtersOpen && <InventoryFilters catalog={catalog} resultCount={inventory?.total} selected={tagIds} onChange={ids => { setTagIds(ids); setNumber(1); }} issuesOnly={issuesOnly} untaggedOnly={untaggedOnly} onIssuesChange={value => { setIssuesOnly(value); setNumber(1); }} onUntaggedChange={value => { setUntaggedOnly(value); setNumber(1); }} onClose={() => setFiltersOpen(false)} />}
   </div>;
 }

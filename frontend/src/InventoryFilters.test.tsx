@@ -22,7 +22,8 @@ describe('multi category inventory filter', () => {
     fireEvent.click(within(screen.getByRole('navigation', { name: '筛选类别' })).getByRole('button', { name: '视频类型' }));
     fireEvent.click(screen.getByRole('button', { name: 'Real' }));
     expect(screen.getByLabelText('筛选结果').textContent).toBe('1,2,3');
-    fireEvent.click(screen.getByRole('button', { name: '取消筛选 作者 A' }));
+    fireEvent.click(within(screen.getByRole('navigation', { name: '筛选类别' })).getByRole('button', { name: '作者2' }));
+    fireEvent.click(screen.getByRole('button', { name: '作者 A' }));
     expect(screen.getByLabelText('筛选结果').textContent).toBe('2,3');
     expect(filterSummary(catalog, [1, 2, 3])).toBe('作者：作者 A / 作者 B · 视频类型：Real');
   });
@@ -33,7 +34,7 @@ describe('multi category inventory filter', () => {
     fireEvent.click(screen.getByRole('button', { name: '下一页' }));
     expect(visibleOptions()).toBe(18);
     fireEvent.change(screen.getByLabelText('搜索筛选标签'), { target: { value: '作者 39' } });
-    expect(visibleOptions()).toBe(1); expect(screen.getByText('1 / 1')).toBeTruthy();
+    expect(visibleOptions()).toBe(1); expect(screen.queryByRole('button', { name: '下一页' })).toBeNull();
   });
   it('makes tag selections and untagged-only mutually exclusive but keeps issues independent', () => {
     render(<Filters untagged />);
