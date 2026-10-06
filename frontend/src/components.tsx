@@ -1,3 +1,4 @@
+import { useDialogBackdropClose } from './useDialogBackdropClose';
 import { workIdentity } from './api';
 import { translate as t, useI18n, getLanguage } from './i18n';
 import { useEffect, useImperativeHandle, useRef, useState } from 'react';
@@ -209,6 +210,7 @@ export function WorkDetail({ id, capabilities, onClose, onSaved, notify, present
   const requestLeave = (next: () => void) => { if (editingCover && coverEditor.current) coverEditor.current.requestLeave(() => { setEditingCover(false); leaveWithOtherDrafts(next); }); else leaveWithOtherDrafts(next); };
   useImperativeHandle(ref, () => ({ requestLeave }));
   const close = () => requestLeave(onClose);
+  const backdrop = useDialogBackdropClose(close);
   const discard = () => {
     if (leaveBlocked) return;
     const next = pendingLeave.current || onClose;
@@ -449,5 +451,5 @@ export function WorkDetail({ id, capabilities, onClose, onSaved, notify, present
     {work && editingCover && <CoverEditor ref={coverEditor} work={work} onOpenFolder={assetId => void open(assetId)} onClose={() => setEditingCover(false)} onSaved={value => { setWork(previous => previous ? { ...previous, cover_url: value.cover_url, cover_revision: value.revision, cover_mode: value.mode } : previous); setEditingCover(false); onSaved(); notify({ kind: 'success', message: t('作品封面已保存') }); }} />}
     {SHOW_ES_POSTS && work && editingPost && <ReleasePostEditor workId={id} onClose={() => setEditingPost(false)} />}
   </>;
-  return presentation === 'page' ? <article className="detail-page" aria-labelledby="detail-title">{content}</article> : <dialog className="detail-dialog" ref={dialog} aria-labelledby="detail-title" onCancel={event => { event.preventDefault(); close(); }} onClick={event => { if (event.target === event.currentTarget) { const rect = event.currentTarget.getBoundingClientRect(); if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) close(); } }}>{content}</dialog>;
+  return presentation === 'page' ? <article className="detail-page" aria-labelledby="detail-title">{content}</article> : <dialog {...backdrop} className="detail-dialog" ref={dialog} aria-labelledby="detail-title" onCancel={event => { event.preventDefault(); close(); }}>{content}</dialog>;
 }

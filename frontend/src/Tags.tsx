@@ -1,3 +1,4 @@
+import { useDialogBackdropClose } from './useDialogBackdropClose';
 import { workIdentity } from './api';
 import { useI18n, translate, tagName } from './i18n';
 import { useEffect, useRef, useState } from 'react';
@@ -46,9 +47,10 @@ export function TagDialog({ title, subtitle, children, footer, onClose, dirty, s
   const closeButton = useRef<HTMLButtonElement>(null);
   const [confirm, setConfirm] = useState(false);
   const close = () => { if (saving) return; if (dirty) setConfirm(true); else onClose(); };
+  const backdrop = useDialogBackdropClose(close);
   useEffect(() => { dialog.current?.showModal(); const previous = document.body.style.overflow; document.body.style.overflow = 'hidden'; return () => { document.body.style.overflow = previous; }; }, []);
   useEffect(() => { if (confirm) keepButton.current?.focus(); }, [confirm]);
-  return <dialog ref={dialog} className={`tag-dialog ${className}`} aria-labelledby="tag-dialog-title" onCancel={event => { event.preventDefault(); close(); }}><div className="detail-header"><div><h2 id="tag-dialog-title">{title}</h2><p className="tag-dialog-subtitle">{subtitle}</p></div><button ref={closeButton} autoFocus className="icon-button" aria-label={closeLabel || translate("关闭标签编辑")} onClick={close} disabled={saving}><X size={20} /></button></div>{confirm && <div className="discard-confirm" role="alert"><strong>{translate("标签修改尚未保存")}</strong><p>{translate("关闭会放弃本次修改。")}</p><div><button className="button small" ref={keepButton} onClick={() => { setConfirm(false); closeButton.current?.focus(); }}>{translate("继续编辑")}</button><button className="button small" onClick={onClose}>{translate("放弃标签修改并关闭")}</button></div></div>}<div className="tag-dialog-body">{children}</div><div className="detail-actions">{footer}</div></dialog>;
+  return <dialog {...backdrop} ref={dialog} className={`tag-dialog ${className}`} aria-labelledby="tag-dialog-title" onCancel={event => { event.preventDefault(); close(); }}><div className="detail-header"><div><h2 id="tag-dialog-title">{title}</h2><p className="tag-dialog-subtitle">{subtitle}</p></div><button ref={closeButton} autoFocus className="icon-button" aria-label={closeLabel || translate("关闭标签编辑")} onClick={close} disabled={saving}><X size={20} /></button></div>{confirm && <div className="discard-confirm" role="alert"><strong>{translate("标签修改尚未保存")}</strong><p>{translate("关闭会放弃本次修改。")}</p><div><button className="button small" ref={keepButton} onClick={() => { setConfirm(false); closeButton.current?.focus(); }}>{translate("继续编辑")}</button><button className="button small" onClick={onClose}>{translate("放弃标签修改并关闭")}</button></div></div>}<div className="tag-dialog-body">{children}</div><div className="detail-actions">{footer}</div></dialog>;
 }
 
 export function WorkTagEditor({ work, onClose, onSaved }: { work: Pick<Work, 'id' | 'script_id' | 'title' | 'duration_status' | 'duration_error'>; onClose: () => void; onSaved: (value: WorkTags) => void }) {

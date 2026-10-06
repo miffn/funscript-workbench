@@ -1,3 +1,4 @@
+import { useDialogBackdropClose } from './useDialogBackdropClose';
 import { workIdentity } from './api';
 import { useEffect, useRef, useState } from 'react';
 import { Check, CircleAlert, Copy, Download, FileText, LoaderCircle, RefreshCw, Save, Settings2, X } from 'lucide-react';
@@ -93,6 +94,7 @@ export function ReleasePostEditor({ workId, onClose }: { workId: number; onClose
   function toggleScript(id: number) { if (inputs) edit({ selected_script_ids: inputs.selected_script_ids.includes(id) ? inputs.selected_script_ids.filter(value => value !== id) : [...inputs.selected_script_ids, id] }); }
   function togglePreview(filename: string) { if (inputs) edit({ selected_preview_filenames: inputs.selected_preview_filenames.includes(filename) ? inputs.selected_preview_filenames.filter(value => value !== filename) : [...inputs.selected_preview_filenames, filename] }); }
   function close() { if (busy) return; if (dirty) { setConfirmClose(true); return; } onClose(); }
+  const backdrop = useDialogBackdropClose(close);
   async function save(generate: boolean, cover = false) {
     if (!state || !inputs || busy) return;
     setBusy(true); setError(''); setMessage('');
@@ -128,7 +130,7 @@ export function ReleasePostEditor({ workId, onClose }: { workId: number; onClose
     return <div className="es-source-list">{files.map(file => <div className="es-source" key={file.filename}><label className="es-check"><input type="checkbox" aria-label={t('{group}：{filename}', { group: t(group), filename: file.filename })} disabled={busy} checked={inputs?.selected_preview_filenames.includes(file.filename) || false} onChange={() => togglePreview(file.filename)} /><span>{file.kind === 'heatmap' ? t("热力图") : file.kind === 'gif' ? 'GIF' : 'WebM'} · {file.filename}<small>{formatSize(file.size)}</small></span></label><a className="button small" href={file.url} download><Download size={15} aria-hidden="true" />{t("下载")}</a></div>)}</div>;
   }
 
-  return <dialog className="tag-dialog es-post-dialog" ref={dialog} aria-labelledby="es-post-title" onCancel={event => { event.preventDefault(); close(); }}>
+  return <dialog {...backdrop} className="tag-dialog es-post-dialog" ref={dialog} aria-labelledby="es-post-title" onCancel={event => { event.preventDefault(); close(); }}>
     <header className="detail-header"><div><p>{t("ES 发布准备")}</p><h2 id="es-post-title">{work ? workIdentity(work) : t("作品")} {t("· 生成贴文")}</h2></div><button className="icon-button" type="button" onClick={close} disabled={busy} aria-label={t("关闭贴文编辑器")}><X size={22} /></button></header>
     <div className="tag-dialog-body es-post-body">
       <p className="es-help">{t("资料、上传 Markdown 和生成稿保存在数据库中。上传附件、粘贴贴文和发布由你在 ES 完成。")}</p>

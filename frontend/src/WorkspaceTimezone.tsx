@@ -1,3 +1,4 @@
+import { useDialogBackdropClose } from './useDialogBackdropClose';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Check, Clock3, LoaderCircle, Search, X } from 'lucide-react';
 import { ApiError, errorMessage, request } from './api';
@@ -51,6 +52,7 @@ export function WorkspaceTimezoneSettings() {
   const lock = useRef(false);
   const dirty = !!loaded && draft !== loaded.timezone;
   const close = () => { if (busy) return; if (dirty) setConfirmClose(true); else setOpened(false); };
+  const backdrop = useDialogBackdropClose(close);
   useEffect(() => {
     if (!opened) return;
     dialog.current?.showModal(); search.current?.focus();
@@ -79,7 +81,7 @@ export function WorkspaceTimezoneSettings() {
   const choices = (loaded?.choices || []).filter(zone => zone.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
   return <>
     <div className="preference-row"><div><strong>{t('工作台时区')}</strong><p>{t('所有设备共用；影响时间显示与新记录的发布日期，历史日期保持原样。')}</p></div><button type="button" className="text-action timezone-current" onClick={() => { setQuery(''); setConfirmClose(false); setOpened(true); }}><Clock3 size={15} />{saved.timezone}</button></div>
-    {opened && <dialog className="timezone-dialog" ref={dialog} aria-labelledby="workspace-timezone-title" onCancel={event => { event.preventDefault(); close(); }}>
+    {opened && <dialog {...backdrop} className="timezone-dialog" ref={dialog} aria-labelledby="workspace-timezone-title" onCancel={event => { event.preventDefault(); close(); }}>
       <header><div><h2 id="workspace-timezone-title">{t('工作台时区')}</h2><p>{t('选择一个时区，所有设备同步使用。')}</p></div><button type="button" className="icon-button" aria-label={t('关闭时区选择')} disabled={busy} onClick={close}><X size={19} /></button></header>
       <div className="timezone-dialog-body">
         {confirmClose && <div className="discard-confirm" role="alert"><p>{t('时区修改尚未保存')}</p><button type="button" className="button small" onClick={() => setConfirmClose(false)}>{t('继续编辑')}</button><button type="button" className="button small" onClick={() => setOpened(false)}>{t('放弃修改并关闭')}</button></div>}

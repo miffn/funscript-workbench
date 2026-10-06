@@ -1,3 +1,4 @@
+import { useDialogBackdropClose } from './useDialogBackdropClose';
 import { useEffect, useImperativeHandle, useRef, useState } from 'react';
 import type { Ref } from 'react';
 import { Camera, Check, LoaderCircle, RotateCcw, X } from 'lucide-react';
@@ -34,6 +35,7 @@ export function CoverEditor({ work, onClose, onSaved, onOpenFolder, ref }: {
   const drag = useRef<{ x: number; y: number; centerX: number; centerY: number } | null>(null);
   const dirty = !!frame;
   const requestLeave = (next: () => void) => { if (operation.current) return; if (dirty) { pendingLeave.current = next; setConfirmClose(true); } else next(); };
+  const backdrop = useDialogBackdropClose(() => requestLeave(onClose));
   useImperativeHandle(ref, () => ({ requestLeave }));
   useEffect(() => { const element = dialog.current!; element.showModal(); return () => element.close(); }, []);
   useEffect(() => {
@@ -72,7 +74,7 @@ export function CoverEditor({ work, onClose, onSaved, onOpenFolder, ref }: {
     } catch (reason) { setConflict((reason as { status?: number }).status === 409); setError(errorMessage(reason)); }
     finally { operation.current = false; setBusy(false); }
   };
-  return <dialog className="cover-editor" ref={dialog} aria-labelledby="cover-editor-title" onCancel={event => { event.preventDefault(); requestLeave(onClose); }}>
+  return <dialog {...backdrop} className="cover-editor" ref={dialog} aria-labelledby="cover-editor-title" onCancel={event => { event.preventDefault(); requestLeave(onClose); }}>
     <header className="cover-editor-header"><div><h2 id="cover-editor-title">{t('更换作品封面')}</h2><p>{workIdentity(work)} · 16:9</p></div><button className="icon-button" onClick={() => requestLeave(onClose)} aria-label={t('关闭封面编辑')} disabled={busy}><X size={19} /></button></header>
     <div className="cover-editor-body">
       {confirmClose && <div className="discard-confirm" role="alert"><strong>{t('封面修改尚未保存')}</strong><p>{t('关闭会放弃当前截图和裁剪。')}</p><div><button autoFocus className="button small" onClick={() => setConfirmClose(false)}>{t('继续编辑')}</button><button className="button small" onClick={() => { setConfirmClose(false); (pendingLeave.current || onClose)(); }}>{t('放弃封面修改')}</button></div></div>}

@@ -128,3 +128,40 @@ describe('inventory link editing', () => {
     expect(screen.getByRole('button', { name: '查看 S058 测试作品' })).toBeTruthy();
   });
 });
+
+describe('release dialog backdrop dismissal', () => {
+  function backdropClick() {
+    const dialog = screen.getByRole('dialog');
+    vi.stubGlobal('PointerEvent', MouseEvent);
+    vi.spyOn(dialog, 'getBoundingClientRect').mockReturnValue({ left: 100, right: 400, top: 100, bottom: 500 } as DOMRect);
+    fireEvent.pointerDown(dialog, { clientX: 20, clientY: 20, button: 0 });
+    fireEvent.click(dialog, { clientX: 20, clientY: 20 });
+  }
+  it('closes a clean quick editor through its normal close callback', async () => {
+    const { onClose } = editor(); await loadedInput('视频链接');
+    backdropClick(); expect(onClose).toHaveBeenCalledOnce();
+  });
+  it('keeps unsaved link input until the user chooses to discard', async () => {
+    const { onClose } = editor(); const input = await loadedInput('视频链接');
+    fireEvent.change(input, { target: { value: 'https://example.com/draft' } });
+    backdropClick(); expect(onClose).not.toHaveBeenCalled();
+    expect((input as HTMLInputElement).value).toBe('https://example.com/draft');
+    expect(screen.getByRole('alert').textContent).toContain('尚未保存');
+    fireEvent.click(screen.getByRole('button', { name: '继续编辑链接' }));
+    expect(screen.queryByRole('alert')).toBeNull();
+    backdropClick(); fireEvent.click(screen.getByRole('button', { name: '放弃链接修改并关闭' }));
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+  it('ignores backdrop dismissal while saving and closes only when the write completes', async () => {
+    const { onClose, onSaved } = editor(); const input = await loadedInput('视频链接');
+    fireEvent.change(input, { target: { value: 'https://example.com/video' } });
+    let finish!: (value: Response) => void;
+    fetchMock.mockImplementation(() => new Promise<Response>(resolve => { finish = resolve; }));
+    fireEvent.click(screen.getByRole('button', { name: '保存链接' }));
+    await waitFor(() => expect(typeof finish).toBe('function'));
+    backdropClick(); expect(onClose).not.toHaveBeenCalled();
+    expect(screen.queryByRole('alert')).toBeNull();
+    finish(response({ ...current, links_revision: 3, links: { ...current.links, video: 'https://example.com/video' } }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalledOnce());
+    expect(onClose).toHaveBeenCalledOnce();
+  });});

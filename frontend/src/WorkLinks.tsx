@@ -1,3 +1,4 @@
+import { useDialogBackdropClose } from './useDialogBackdropClose';
 import { useEffect, useId, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { CalendarDays, Check, CircleDollarSign, Copy, FileDown, LoaderCircle, MessagesSquare, Pencil, Video, X } from 'lucide-react';
@@ -69,6 +70,7 @@ function ReleaseEditor({ work, initialKind, onClose, onSaved, onDirtyChange, onB
   const dirty = !!current && (changed.length > 0 || publicationChanged.length > 0);
   const disabled = saving || conflict;
   const close = () => { if (saving) return; if (dirty) setConfirmClose(true); else onClose?.(); };
+  const backdrop = useDialogBackdropClose(close);
   useEffect(() => { onDirtyChange?.(dirty); }, [dirty, onDirtyChange]);
   useEffect(() => { onBusyChange?.(saving); }, [saving, onBusyChange]);
   useEffect(() => {
@@ -196,7 +198,7 @@ function ReleaseEditor({ work, initialKind, onClose, onSaved, onDirtyChange, onB
       <footer className="release-save-bar"><span className="release-save-hint">{dirty ? translate('修改尚未保存') : translate('已保存的发布信息')} · {timezone}</span><div><button type="button" className="button" disabled={saving || !dirty} onClick={modal ? close : reset}>{translate(modal ? '取消' : '重置修改')}</button><button type="submit" className="button primary" disabled={loading || saving || !dirty || conflict}>{saving ? <LoaderCircle className="spin" size={16} /> : <Check size={16} />}{saving ? translate('正在保存') : translate('保存链接')}</button></div></footer>
     </form>}
   </div>;
-  return modal ? <dialog ref={dialog} className="tag-dialog work-links-dialog" aria-labelledby={`${instance}-title`} onCancel={event => { event.preventDefault(); close(); }}>
+  return modal ? <dialog {...backdrop} ref={dialog} className="tag-dialog work-links-dialog" aria-labelledby={`${instance}-title`} onCancel={event => { event.preventDefault(); close(); }}>
     <header className="release-modal-head"><div><h2 id={`${instance}-title`}>{translate('快速编辑发布信息')}</h2><p>{identity}{subtitle && subtitle.toLocaleLowerCase() !== identity.toLocaleLowerCase() ? ` · ${subtitle}` : ''}</p></div><button type="button" className="icon-button" aria-label={translate('关闭链接编辑')} onClick={close} disabled={saving}><X size={20} /></button></header>{body}
   </dialog> : <div className="work-release-panel">{body}</div>;
 }
