@@ -156,6 +156,7 @@ MUTATIONS = {
     'work_links': ("INSERT INTO work_links(work_id,overrides) VALUES(4,'{}')", 'UPDATE work_links SET revision=1 WHERE work_id=4', 'DELETE FROM work_links WHERE work_id=4'),
     'work_durations': ("INSERT INTO work_durations(work_id,total_seconds,updated_at) VALUES(4,60,'a')", 'UPDATE work_durations SET total_seconds=90 WHERE work_id=4', 'DELETE FROM work_durations WHERE work_id=4'),
     'release_calendar_plans': ("INSERT INTO release_calendar_plans(work_id,es_planned_date) VALUES(4,'2026-10-08')", "UPDATE release_calendar_plans SET es_planned_date='2026-10-09' WHERE work_id=4", 'DELETE FROM release_calendar_plans WHERE work_id=4'),
+    'tag_category_styles': ("INSERT INTO tag_category_styles(category) VALUES('custom')", "UPDATE tag_category_styles SET bold=1 WHERE category='custom'", "DELETE FROM tag_category_styles WHERE category='custom'"),
     'settings': ("INSERT INTO settings(key,value) VALUES('last_scan','{}')", "UPDATE settings SET value='{} ' WHERE key='last_scan'", "DELETE FROM settings WHERE key='last_scan'"),
 }
 
@@ -164,6 +165,8 @@ MUTATIONS = {
 def test_each_inventory_table_insert_update_delete_advances_revision(inventory, table):
     _, _, store = inventory
     with store.connection() as db:
+        if table == 'tag_category_styles':
+            db.execute("DELETE FROM tag_category_styles WHERE category='custom'")
         revision = inventory_revision(db)
         for statement in MUTATIONS[table]:
             db.execute(statement)

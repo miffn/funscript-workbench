@@ -2,7 +2,7 @@
 html:root{--tag-author-fg:#2f5947;--tag-video-fg:#505057;--tag-axis-fg:#505057;--tag-release-fg:#505057;--tag-tier-fg:#75562c;--tag-custom-fg:#505057}
 html:root[data-theme=dark]{--tag-author-fg:#bedbca;--tag-video-fg:#c4c4cc;--tag-axis-fg:#c4c4cc;--tag-release-fg:#c4c4cc;--tag-tier-fg:#dec69b;--tag-custom-fg:#c4c4cc}
 .tag-text-line.tag-chips{display:flex;flex-wrap:wrap;gap:0;align-items:baseline;min-height:0}
-.tag-text-line .tag-chip{display:inline;border:0;padding:0;border-radius:0;background:none;color:var(--tag-fg,var(--muted));font-size:12px;line-height:1.6;font-weight:550;max-width:100%;overflow-wrap:anywhere}
+.tag-text-line .tag-chip{display:inline;border:0;padding:0;border-radius:0;background:none;color:var(--tag-fg,var(--muted));font-size:12px;line-height:1.6;font-weight:var(--tag-weight,550);max-width:100%;overflow-wrap:anywhere}
 .tag-text-line .tag-chip+.tag-chip:before{content:'·';display:inline;padding:0 7px;color:var(--muted);font-weight:400}
 /* Sample structure: native dialog supplies focus and Escape, these scoped rules own the surface. */
 dialog.tag-dialog.tag-work-dialog,dialog.tag-dialog.inventory-filter-dialog{width:min(800px,calc(100vw - 32px));height:auto;max-height:90dvh;margin:auto;border:1px solid var(--line);border-radius:18px;padding:0;background:var(--surface);color:var(--text);box-shadow:0 20px 65px #0000002e;overflow:auto}
@@ -40,3 +40,11 @@ html[data-theme=dark] :is(.tag-text-line,.tag-transfer,.tag-manager-layout,.inve
 .tag-color-preview span{font-size:13px;font-weight:550;overflow-wrap:anywhere}
 .tag-color-settings>.tag-clear-action{margin-top:6px}
 @media(max-width:400px){.tag-color-grid{grid-template-columns:1fr}}
+
+.tag-option .tag-value,.tag-table-name .tag-value{font-weight:var(--tag-weight,550)}
+.tag-manager-actions{display:flex;align-items:center;gap:15px;flex-wrap:wrap}
+.tag-category-style-editor .tag-manage-form{max-width:640px}
+.tag-color-settings .tag-inline-choices{align-items:center;margin:12px 0 2px}
+.tag-color-settings .tag-inline-choices>span{font-size:12px;color:var(--muted);margin-right:4px}
+
+.tag-category-style-editor{margin:0 0 14px}

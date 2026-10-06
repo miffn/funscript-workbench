@@ -73,8 +73,16 @@ CREATE TABLE IF NOT EXISTS tags (
  provenance TEXT NOT NULL DEFAULT '[]',
  color_light TEXT CHECK(color_light IS NULL OR (length(color_light)=7 AND substr(color_light,1,1)='#' AND substr(color_light,2) NOT GLOB '*[^0-9A-Fa-f]*')),
  color_dark TEXT CHECK(color_dark IS NULL OR (length(color_dark)=7 AND substr(color_dark,1,1)='#' AND substr(color_dark,2) NOT GLOB '*[^0-9A-Fa-f]*')),
+ bold INTEGER CHECK(bold IS NULL OR bold IN (0,1)),
  UNIQUE(category,name_key),
  CHECK((support_status='url' AND support_url IS NOT NULL) OR (support_status IN ('unknown','none') AND support_url IS NULL))
+);
+CREATE TABLE IF NOT EXISTS tag_category_styles (
+ category TEXT PRIMARY KEY CHECK(category IN ('author','video_type','axis_type','release_type','tier','duration','custom')),
+ color_light TEXT CHECK(color_light IS NULL OR (length(color_light)=7 AND substr(color_light,1,1)='#' AND substr(color_light,2) NOT GLOB '*[^0-9A-Fa-f]*')),
+ color_dark TEXT CHECK(color_dark IS NULL OR (length(color_dark)=7 AND substr(color_dark,1,1)='#' AND substr(color_dark,2) NOT GLOB '*[^0-9A-Fa-f]*')),
+ bold INTEGER CHECK(bold IS NULL OR bold IN (0,1)),
+ revision INTEGER NOT NULL DEFAULT 0 CHECK(revision>=0)
 );
 CREATE TABLE IF NOT EXISTS work_tags (
  work_id INTEGER NOT NULL REFERENCES works(id),
@@ -145,7 +153,7 @@ COVER_COLUMNS = (
 )
 INVENTORY_TABLES = (
     'works', 'directories', 'assets', 'covers', 'issues', 'tags', 'work_tags',
-    'work_tag_state', 'work_links', 'work_durations', 'release_calendar_plans',
+    'work_tag_state', 'work_links', 'work_durations', 'release_calendar_plans', 'tag_category_styles',
 )
 INVENTORY_SETTING_KEYS = ('root_catalog', 'last_scan')
 
@@ -159,6 +167,11 @@ def add_tag_color_schema(db):
                        f"substr({field},2) NOT GLOB '*[^0-9A-Fa-f]*'))")
             # An old trigger's UPDATE predicate has no knowledge of this column.
             db.execute('DROP TRIGGER IF EXISTS inventory_tags_update')
+    if 'bold' not in columns:
+        db.execute('ALTER TABLE tags ADD COLUMN bold INTEGER CHECK(bold IS NULL OR bold IN (0,1))')
+        db.execute('DROP TRIGGER IF EXISTS inventory_tags_update')
+    for category in ('author', 'video_type', 'axis_type', 'release_type', 'tier', 'duration', 'custom'):
+        db.execute('INSERT OR IGNORE INTO tag_category_styles(category) VALUES(?)', (category,))
 
 
 def add_cover_schema(db):
@@ -177,6 +190,8 @@ def add_inventory_revision_schema(db):
     db.execute('INSERT OR IGNORE INTO inventory_state(id,revision) VALUES(1,0)')
     for table in (*INVENTORY_TABLES, 'settings'):
         columns = [row['name'] for row in db.execute(f'PRAGMA table_info({table})')]
+        if not columns:
+            continue
         changed = ' OR '.join(f'OLD."{column}" IS NOT NEW."{column}"' for column in columns)
         for operation in ('INSERT', 'UPDATE', 'DELETE'):
             when = changed if operation == 'UPDATE' else ''

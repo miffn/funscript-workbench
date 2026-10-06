@@ -1,5 +1,6 @@
 from concurrent.futures import ThreadPoolExecutor
 import sqlite3
+import re
 
 from fastapi.testclient import TestClient
 import pytest
@@ -170,6 +171,7 @@ def test_parallel_color_edits_have_one_winner(colored_tags):
 @pytest.mark.parametrize('legacy_categories', [False, True])
 def test_legacy_migration_preserves_tag_ids_bindings_metadata_and_updates_revision_trigger(tmp_path, legacy_categories):
     legacy_schema = '\n'.join(line for line in SCHEMA.splitlines() if not line.lstrip().startswith(('color_light ', 'color_dark ')))
+    legacy_schema = re.sub(r'CREATE TABLE IF NOT EXISTS tag_category_styles \([\s\S]+?\);', '', legacy_schema)
     if legacy_categories:
         legacy_schema = legacy_schema.replace("'axis_type',", '').replace("'duration',", '')
     db = sqlite3.connect(tmp_path / 'workbench.sqlite3')

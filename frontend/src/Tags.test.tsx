@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { TagChips, TagsPage, WorkTagEditor, tagColorStyle } from './Tags';
-import type { Tag, Work, WorkTags } from './api';
+import type { Tag, TagCategoryStyle, Work, WorkTags } from './api';
 
 const makeTag = (id: number, category: Tag['category'], name: string): Tag => ({ id, category, name, revision: 1, usage_count: 0, support_status: 'unknown', support_url: null });
 const tags = [makeTag(1, 'author', '作者 A'), makeTag(2, 'author', '作者 B'), makeTag(3, 'video_type', 'Real'), makeTag(4, 'video_type', 'Anime'), makeTag(5, 'release_type', 'Paid'), makeTag(6, 'release_type', 'Free Sample'), makeTag(7, 'tier', 'Main Tier'), makeTag(8, 'tier', 'Free'), makeTag(9, 'custom', '短片'), makeTag(10, 'custom', '收藏')];
@@ -12,17 +12,30 @@ let fetchMock: ReturnType<typeof vi.fn>;
 let binding: WorkTags;
 let catalog: Tag[];
 let failStatus: number;
+let categoryStyles: TagCategoryStyle[];
 let importReport: Record<string, unknown> | null;
 
 beforeEach(() => {
   binding = { work_id: 7, tags: [], tags_revision: 2 }; catalog = tags.map(tag => ({ ...tag })); failStatus = 0; importReport = null;
+  categoryStyles = [];
   localStorage.clear(); window.location.hash = '#/inventory';
   fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+    if (url.startsWith('/api/tag-category-styles/')) {
+      const category = url.split('/').pop() as Tag['category'];
+      let current = categoryStyles.find(style => style.category === category) || { category, color_light: null, color_dark: null, bold: null, revision: 0 };
+      if (init?.method === 'PATCH') {
+        if (failStatus) return Promise.resolve(response({ detail: '资料有冲突' }, failStatus));
+        const { expected_revision, ...fields } = JSON.parse(init.body as string);
+        current = { ...current, ...fields, revision: expected_revision + 1 };
+        categoryStyles = [...categoryStyles.filter(style => style.category !== category), current];
+      }
+      return Promise.resolve(response(current));
+    }
     if (url === '/api/tags' && init?.method === 'POST' || url.startsWith('/api/tags/') && init?.method === 'PATCH') {
       if (failStatus) return Promise.resolve(response({ detail: '资料有冲突' }, failStatus));
       return Promise.resolve(response({ ...catalog[0], ...JSON.parse(init!.body as string) }));
     }
-    if (url === '/api/tags') return Promise.resolve(response({ items: catalog, categories: [], import_report: importReport }));
+    if (url === '/api/tags') return Promise.resolve(response({ items: catalog.map(tag => ({ ...tag, category_style: categoryStyles.find(style => style.category === tag.category) })), category_styles: categoryStyles, categories: [], import_report: importReport }));
     if (url === '/api/works/7/tags') {
       if (init?.method === 'PUT') {
         if (failStatus) return Promise.resolve(response({ detail: '版本有冲突' }, failStatus));
@@ -314,7 +327,7 @@ describe('custom tag colors', () => {
     catalog[0] = { ...catalog[0], color_light: '#124B35', color_dark: '#ACDEC5' };
     render(<TagsPage revision={0} onChanged={vi.fn()} />);
     fireEvent.click(await screen.findByRole('button', { name: '编辑标签 作者 A' }));
-    fireEvent.click(screen.getByRole('button', { name: '恢复默认颜色' }));
+    fireEvent.click(screen.getByRole('button', { name: '恢复默认颜色与字重' }));
     fireEvent.click(screen.getByRole('button', { name: '保存资料' }));
     await screen.findByText('标签资料已保存');
     const [url, init] = fetchMock.mock.calls.find(([, init]) => init?.method === 'PATCH')!;
@@ -351,5 +364,69 @@ describe('custom tag colors', () => {
     const [, init] = fetchMock.mock.calls.find(([, init]) => init?.method === 'POST')!;
     expect(JSON.parse(init.body)).toMatchObject({ category: 'author', name: '新作者', color_light: '#124B35' });
     expect(JSON.parse(init.body)).not.toHaveProperty('color_dark');
+  });
+});
+describe('tag type styles and text weight', () => {
+  it('resolves individual overrides before type styles, including regular weight', () => {
+    const inherited: TagCategoryStyle = { category: 'author', color_light: '#335544', color_dark: '#BBDDCC', bold: true, revision: 3 };
+    expect(tagColorStyle({ ...tags[0], category_style: inherited })).toEqual({ '--tag-fg': 'light-dark(#335544, #BBDDCC)', '--tag-weight': 650 });
+    expect(tagColorStyle({ ...tags[0], color_light: '#124B35', bold: false, category_style: inherited })).toEqual({ '--tag-fg': 'light-dark(#124B35, #BBDDCC)', '--tag-weight': 400 });
+    expect(tagColorStyle({ ...tags[0], color_light: null, bold: null, category_style: inherited })).toEqual({ '--tag-fg': 'light-dark(#335544, #BBDDCC)', '--tag-weight': 650 });
+  });
+
+  it('saves a type-wide style with its own revision and refreshes tags and new-tag previews', async () => {
+    const changed = vi.fn(); render(<TagsPage revision={0} onChanged={changed} />);
+    await screen.findByRole('button', { name: '编辑标签 作者 A' });
+    fireEvent.click(screen.getByRole('button', { name: '编辑类型样式' }));
+    fireEvent.change(screen.getByLabelText('浅色标签颜色'), { target: { value: '#335544' } });
+    fireEvent.click(within(screen.getByRole('group', { name: '文字加粗' })).getByRole('button', { name: '加粗' }));
+    expect((screen.getByRole('button', { name: '编辑标签 作者 B' }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: '保存类型样式' }));
+    await waitFor(() => expect(changed).toHaveBeenCalledOnce());
+    const [url, init] = fetchMock.mock.calls.find(([, init]) => init?.method === 'PATCH')!;
+    expect(url).toBe('/api/tag-category-styles/author');
+    expect(JSON.parse(init.body)).toEqual({ expected_revision: 0, color_light: '#335544', color_dark: null, bold: true });
+    await waitFor(() => expect((screen.getByRole('button', { name: '选择标签 作者 B' }) as HTMLElement).style.getPropertyValue('--tag-weight')).toBe('650'));
+    fireEvent.click(screen.getByRole('button', { name: '创建标签' }));
+    expect((document.querySelector('.tag-color-preview.light>span') as HTMLElement).style.color).toBe('rgb(51, 85, 68)');
+    expect((document.querySelector('.tag-color-preview.light>span') as HTMLElement).style.fontWeight).toBe('650');
+  });
+
+  it('keeps failed type drafts, refreshes conflicts, and resets defaults atomically', async () => {
+    categoryStyles = [{ category: 'author', color_light: '#335544', color_dark: '#BBDDCC', bold: true, revision: 3 }];
+    render(<TagsPage revision={0} onChanged={vi.fn()} />);
+    await screen.findByRole('button', { name: '编辑标签 作者 A' });
+    fireEvent.click(screen.getByRole('button', { name: '编辑类型样式' }));
+    fireEvent.change(screen.getByLabelText('浅色标签颜色'), { target: { value: '#224433' } });
+    failStatus = 503; fireEvent.click(screen.getByRole('button', { name: '保存类型样式' }));
+    await screen.findByRole('alert');
+    expect((screen.getByLabelText('浅色标签颜色') as HTMLInputElement).value).toBe('#224433');
+    failStatus = 409; fireEvent.click(screen.getByRole('button', { name: '保存类型样式' }));
+    await screen.findByText(/类型样式已被其他客户端修改/);
+    expect((screen.getByRole('button', { name: '保存类型样式' }) as HTMLButtonElement).disabled).toBe(true);
+    categoryStyles[0].revision = 5; failStatus = 0;
+    fireEvent.click(screen.getByRole('button', { name: '刷新并重新编辑' }));
+    await waitFor(() => expect((screen.getByLabelText('浅色标签颜色') as HTMLInputElement).value).toBe('#335544'));
+    fireEvent.click(screen.getByRole('button', { name: '恢复默认颜色与字重' }));
+    fireEvent.click(screen.getByRole('button', { name: '保存类型样式' }));
+    await screen.findByText('类型样式已保存');
+    const [, init] = fetchMock.mock.calls.filter(([, init]) => init?.method === 'PATCH').at(-1)!;
+    expect(JSON.parse(init.body)).toEqual({ expected_revision: 5, color_light: null, color_dark: null, bold: null });
+  });
+
+  it('saves a single-tag weight override and can return it to type inheritance', async () => {
+    catalog[0].bold = true;
+    categoryStyles = [{ category: 'author', color_light: null, color_dark: null, bold: true, revision: 1 }];
+    render(<TagsPage revision={0} onChanged={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: '编辑标签 作者 A' }));
+    const group = screen.getByRole('group', { name: '文字加粗' });
+    fireEvent.click(within(group).getByRole('button', { name: '不加粗' }));
+    fireEvent.click(screen.getByRole('button', { name: '保存资料' }));
+    await screen.findByText('标签资料已保存');
+    expect(JSON.parse(fetchMock.mock.calls.find(([, init]) => init?.method === 'PATCH')![1].body)).toMatchObject({ bold: false, expected_revision: 1 });
+    fireEvent.click(within(group).getByRole('button', { name: '跟随类型' }));
+    fireEvent.click(screen.getByRole('button', { name: '保存资料' }));
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'PATCH').length).toBe(2));
+    expect(JSON.parse(fetchMock.mock.calls.filter(([, init]) => init?.method === 'PATCH').at(-1)![1].body)).toMatchObject({ bold: null });
   });
 });

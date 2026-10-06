@@ -66,6 +66,12 @@ def validate_color(value: str | None) -> str | None:
     return value.upper()
 
 
+def validate_bold(value: bool | None) -> bool | None:
+    if value is not None and not isinstance(value, bool):
+        raise TagError('标签加粗必须为 true、false 或 null')
+    return value
+
+
 def validate_name(category: str, name: str) -> str:
     if category not in CATEGORIES:
         raise TagError("标签类别无效")
@@ -153,19 +159,50 @@ class TagService:
                     sync_axis_tag(db, work[0], initialize=True)
                 db.execute("INSERT INTO settings(key,value) VALUES('axis_tags_initialized','true')")
 
-    def tag(self, db, tag_id: int) -> dict:
+    def category_styles(self, db) -> dict[str, dict]:
+        rows = {row['category']: dict(row) for row in db.execute('SELECT * FROM tag_category_styles')}
+        return {category: {**rows.get(category, {'category': category, 'color_light': None,
+                                                'color_dark': None, 'bold': None, 'revision': 0}),
+                           'bold': bool(rows[category]['bold']) if category in rows and rows[category]['bold'] is not None else None}
+                for category in CATEGORIES}
+
+    def category_style(self, db, category: str) -> dict:
+        if category not in CATEGORIES:
+            raise TagError('标签类别无效')
+        return self.category_styles(db)[category]
+
+    def update_category_style(self, category: str, changes: dict) -> dict:
+        with self.store.connection() as db:
+            db.execute('BEGIN IMMEDIATE')
+            current = self.category_style(db, category)
+            if changes['expected_revision'] != current['revision']:
+                raise TagError('类型样式已被其他客户端修改，请刷新后重试', 409)
+            colors = [validate_color(changes.get(field, current[field])) for field in COLOR_FIELDS]
+            bold = validate_bold(changes.get('bold', current['bold']))
+            if colors != [current[field] for field in COLOR_FIELDS] or bold != current['bold']:
+                db.execute('INSERT INTO tag_category_styles(category,color_light,color_dark,bold,revision) VALUES(?,?,?,?,?) '
+                           'ON CONFLICT(category) DO UPDATE SET color_light=excluded.color_light,color_dark=excluded.color_dark,'
+                           'bold=excluded.bold,revision=excluded.revision',
+                           (category, *colors, bold, current['revision'] + 1))
+            return self.category_style(db, category)
+
+    def tag(self, db, tag_id: int, category_styles: dict | None = None) -> dict:
         row = db.execute("SELECT t.*,count(wt.work_id) AS usage_count FROM tags t LEFT JOIN work_tags wt ON wt.tag_id=t.id WHERE t.id=? GROUP BY t.id", (tag_id,)).fetchone()
         if row is None:
             raise TagError("标签不存在", 404)
         result = {key: row[key] for key in ("id", "category", "name", "support_url", "support_status", "revision", "usage_count", *COLOR_FIELDS)}
+        result['bold'] = bool(row['bold']) if row['bold'] is not None else None
+        result['category_style'] = (category_styles or self.category_styles(db))[row['category']]
         result["support_candidates"] = json.loads(row["support_candidates"])
         return result
 
     def catalog(self) -> dict:
         with self.store.connection() as db:
+            styles = self.category_styles(db)
             ids = [row[0] for row in db.execute("SELECT id FROM tags ORDER BY category,name_key")]
             report = db.execute("SELECT value FROM settings WHERE key='tag_import_report'").fetchone()
-            return {"items": [self.tag(db, tag_id) for tag_id in ids], "categories": list(CATEGORIES),
+            return {"items": [self.tag(db, tag_id, styles) for tag_id in ids], "categories": list(CATEGORIES),
+                    'category_styles': list(styles.values()),
                     "import_report": json.loads(report[0]) if report else None}
 
     def work_state(self, db, work_id: int) -> dict:
@@ -173,7 +210,8 @@ class TagService:
             raise TagError("库存编号不存在", 404)
         row = db.execute("SELECT * FROM work_tag_state WHERE work_id=?", (work_id,)).fetchone()
         ids = [row[0] for row in db.execute("SELECT wt.tag_id FROM work_tags wt JOIN tags t ON t.id=wt.tag_id WHERE wt.work_id=? ORDER BY t.category,t.name_key", (work_id,))]
-        return {"work_id": work_id, "tags": [self.tag(db, tag_id) for tag_id in ids], "tags_revision": row["revision"] if row else 0}
+        styles = self.category_styles(db)
+        return {"work_id": work_id, "tags": [self.tag(db, tag_id, styles) for tag_id in ids], "tags_revision": row["revision"] if row else 0}
 
     def create(self, changes: dict) -> dict:
         category = changes["category"]
@@ -182,13 +220,14 @@ class TagService:
         name = validate_name(category, changes["name"])
         status, url = support_fields(category, changes)
         colors = [validate_color(changes.get(field)) for field in COLOR_FIELDS]
+        bold = validate_bold(changes.get('bold'))
         with self.store.connection() as db:
             db.execute("BEGIN IMMEDIATE")
             if db.execute("SELECT id FROM tags WHERE category=? AND name_key=?", (category, name.casefold())).fetchone():
                 raise TagError("该类别中已存在同名标签，请使用已有标签", 409)
             manual = category == "author" and any(key in changes for key in ("support_url", "support_status"))
-            tag_id = db.execute("INSERT INTO tags(category,name,name_key,support_url,support_status,support_manual,color_light,color_dark) VALUES(?,?,?,?,?,?,?,?)",
-                                (category, name, name.casefold(), url, status, int(manual), *colors)).lastrowid
+            tag_id = db.execute("INSERT INTO tags(category,name,name_key,support_url,support_status,support_manual,color_light,color_dark,bold) VALUES(?,?,?,?,?,?,?,?,?)",
+                                (category, name, name.casefold(), url, status, int(manual), *colors, bold)).lastrowid
             return self.tag(db, tag_id)
 
     def update(self, tag_id: int, changes: dict) -> dict:
@@ -208,6 +247,9 @@ class TagService:
             status, url = support_fields(current["category"], changes, current)
             colors = [validate_color(changes.get(field, current[field])) for field in COLOR_FIELDS]
             colors_changed = any(value != current[field] for field, value in zip(COLOR_FIELDS, colors))
+            current_bold = bool(current['bold']) if current['bold'] is not None else None
+            bold = validate_bold(changes.get('bold', current_bold))
+            appearance_changed = colors_changed or bold != current_bold
             # Renaming an enum label may change validity of every linked work.
             if current["category"] in {"release_type", "tier"} and name != current["name"]:
                 for work in db.execute("SELECT work_id FROM work_tags WHERE tag_id=?", (tag_id,)).fetchall():
@@ -217,14 +259,14 @@ class TagService:
                             selected["name"] = name
                     validate_selection(selection)
             manual = current["support_manual"] or (current["category"] == "author" and any(key in changes for key in ("support_url", "support_status")))
-            changed = name != current["name"] or status != current["support_status"] or url != current["support_url"] or manual != current["support_manual"] or colors_changed
+            changed = name != current["name"] or status != current["support_status"] or url != current["support_url"] or manual != current["support_manual"] or appearance_changed
             if changed:
-                db.execute("UPDATE tags SET name=?,name_key=?,support_status=?,support_url=?,support_manual=?,color_light=?,color_dark=?,revision=revision+1 WHERE id=?", (name, name.casefold(), status, url, int(manual), *colors, tag_id))
+                db.execute("UPDATE tags SET name=?,name_key=?,support_status=?,support_url=?,support_manual=?,color_light=?,color_dark=?,bold=?,revision=revision+1 WHERE id=?", (name, name.casefold(), status, url, int(manual), *colors, bold, tag_id))
                 if name != current["name"]:
                     # Shared renaming is a manual classification decision for linked works.
                     # Protect their association and invalidate stale binding editors atomically.
                     db.execute("INSERT INTO work_tag_state(work_id,revision,manual_edited) SELECT work_id,1,1 FROM work_tags WHERE tag_id=? ON CONFLICT(work_id) DO UPDATE SET revision=work_tag_state.revision+1,manual_edited=1", (tag_id,))
-                elif colors_changed:
+                elif appearance_changed:
                     # Cosmetic edits invalidate readers without freezing scanned classifications.
                     db.execute("INSERT INTO work_tag_state(work_id,revision) SELECT work_id,1 FROM work_tags WHERE tag_id=? ON CONFLICT(work_id) DO UPDATE SET revision=work_tag_state.revision+1", (tag_id,))
             return self.tag(db, tag_id)

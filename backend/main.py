@@ -133,6 +133,7 @@ class TagCreate(BaseModel):
     support_status: Literal["unknown", "none", "url"] | None = None
     color_light: TagColor = None
     color_dark: TagColor = None
+    bold: bool | None = Field(default=None, strict=True)
 
 
 class TagEdit(BaseModel):
@@ -143,6 +144,15 @@ class TagEdit(BaseModel):
     support_status: Literal["unknown", "none", "url"] | None = None
     color_light: TagColor = None
     color_dark: TagColor = None
+    bold: bool | None = Field(default=None, strict=True)
+
+
+class TagCategoryStyleEdit(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    expected_revision: int = Field(strict=True, ge=0)
+    color_light: TagColor = None
+    color_dark: TagColor = None
+    bold: bool | None = Field(default=None, strict=True)
 
 
 class WorkTagsEdit(BaseModel):
@@ -527,6 +537,21 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
     def edit_tag(tag_id: int, options: TagEdit):
         try:
             return tags.update(tag_id, options.model_dump(exclude_unset=True))
+        except TagError as error:
+            raise HTTPException(error.status_code, str(error))
+
+    @app.get('/api/tag-category-styles/{category}')
+    def tag_category_style(category: str):
+        try:
+            with store.connection() as db:
+                return tags.category_style(db, category)
+        except TagError as error:
+            raise HTTPException(error.status_code, str(error))
+
+    @app.patch('/api/tag-category-styles/{category}')
+    def edit_tag_category_style(category: str, options: TagCategoryStyleEdit):
+        try:
+            return tags.update_category_style(category, options.model_dump(exclude_unset=True))
         except TagError as error:
             raise HTTPException(error.status_code, str(error))
 
