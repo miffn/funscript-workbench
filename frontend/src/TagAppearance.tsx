@@ -4,8 +4,8 @@ import { ApiError, errorMessage, request } from './api';
 import type { Tag, TagCategory, TagCategoryStyle } from './api';
 import { translate as t } from './i18n';
 
-const colorTokens: Record<TagCategory, string> = { author: 'author', video_type: 'video', axis_type: 'axis', release_type: 'release', tier: 'tier', custom: 'custom', duration: 'custom' };
-const defaultColors: Record<TagCategory, [string, string]> = { author: ['#2F5947', '#BEDBCA'], video_type: ['#505057', '#C4C4CC'], axis_type: ['#505057', '#C4C4CC'], release_type: ['#505057', '#C4C4CC'], tier: ['#75562C', '#DEC69B'], custom: ['#505057', '#C4C4CC'], duration: ['#505057', '#C4C4CC'] };
+const colorTokens: Record<string, string> = { author: 'author', video_type: 'video', axis_type: 'axis', release_type: 'release', tier: 'tier', custom: 'custom', duration: 'custom' };
+const defaultColors: Record<string, [string, string]> = { author: ['#2F5947', '#BEDBCA'], video_type: ['#505057', '#C4C4CC'], axis_type: ['#505057', '#C4C4CC'], release_type: ['#505057', '#C4C4CC'], tier: ['#75562C', '#DEC69B'], custom: ['#505057', '#C4C4CC'], duration: ['#505057', '#C4C4CC'] };
 const validHex = (value: string) => /^#[0-9A-F]{6}$/i.test(value);
 export const validTagColors = (...values: string[]) => values.every(value => !value || validHex(value));
 
@@ -14,7 +14,7 @@ export function tagColorStyle(tag: Pick<Tag, 'category' | 'color_light' | 'color
   const dark = tag.color_dark ?? tag.category_style?.color_dark;
   const bold = tag.bold ?? tag.category_style?.bold;
   if (!light && !dark && bold == null) return undefined;
-  const fallback = `var(--tag-${colorTokens[tag.category]}-fg)`;
+  const fallback = `var(--tag-${colorTokens[tag.category] || 'custom'}-fg)`;
   return { ...(light || dark ? { '--tag-fg': `light-dark(${light || fallback}, ${dark || fallback})` } : {}), ...(bold != null ? { '--tag-weight': bold ? 650 : 400 } : {}) } as CSSProperties;
 }
 
@@ -24,7 +24,8 @@ export function TagAppearanceFields({ category, name, colorLight, colorDark, bol
   inherited?: TagCategoryStyle; disabled: boolean; categoryMode?: boolean;
 }) {
   const prefix = categoryMode ? 'category' : 'tag';
-  const fallback = [inherited?.color_light || defaultColors[category][0], inherited?.color_dark || defaultColors[category][1]];
+  const defaults = defaultColors[category] || defaultColors.custom;
+  const fallback = [inherited?.color_light || defaults[0], inherited?.color_dark || defaults[1]];
   const effectiveBold = bold ?? inherited?.bold;
   return <fieldset className="tag-color-settings" disabled={disabled}><legend>{t('标签文字颜色')}</legend><p className="help-text">{t(categoryMode ? '本类型的标签统一使用此样式；单个标签的自定义设置优先。' : '留空跟随类型设置；单个标签的自定义设置优先。')}</p>
     <div className="tag-color-grid">{([['light', colorLight, setColorLight], ['dark', colorDark, setColorDark]] as const).map(([theme, value, setValue], index) => <div className="tag-color-control" key={theme}><label htmlFor={`${prefix}-color-${theme}`}>{t(theme === 'light' ? '浅色标签颜色' : '深色标签颜色')}</label><div className="tag-color-inputs"><input type="color" aria-label={t(theme === 'light' ? '选择浅色颜色' : '选择深色颜色')} value={validHex(value) ? value : fallback[index]} onChange={event => setValue(event.target.value.toUpperCase())} /><input id={`${prefix}-color-${theme}`} type="text" maxLength={7} placeholder={t(categoryMode ? '系统默认' : '跟随类型')} value={value} spellCheck={false} aria-invalid={!!value && !validHex(value)} onChange={event => setValue(event.target.value.toUpperCase())} /></div><div className={`tag-color-preview ${theme}`}><small>{t(theme === 'light' ? '浅色预览' : '深色预览')}</small><span style={{ color: validHex(value) ? value : fallback[index], fontWeight: effectiveBold == null ? 550 : effectiveBold ? 650 : 400 }}>{name}</span></div></div>)}</div>

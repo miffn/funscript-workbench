@@ -63,7 +63,7 @@ CREATE TABLE IF NOT EXISTS history (
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS tags (
  id INTEGER PRIMARY KEY,
- category TEXT NOT NULL CHECK(category IN ('author','video_type','axis_type','release_type','tier','duration','custom')),
+ category TEXT NOT NULL CHECK(category IN ('author','video_type','axis_type','release_type','tier','duration','custom') OR category GLOB 'custom_[0-9]*'),
  name TEXT NOT NULL, name_key TEXT NOT NULL,
  support_url TEXT,
  support_status TEXT NOT NULL DEFAULT 'unknown' CHECK(support_status IN ('unknown','none','url')),
@@ -74,11 +74,16 @@ CREATE TABLE IF NOT EXISTS tags (
  color_light TEXT CHECK(color_light IS NULL OR (length(color_light)=7 AND substr(color_light,1,1)='#' AND substr(color_light,2) NOT GLOB '*[^0-9A-Fa-f]*')),
  color_dark TEXT CHECK(color_dark IS NULL OR (length(color_dark)=7 AND substr(color_dark,1,1)='#' AND substr(color_dark,2) NOT GLOB '*[^0-9A-Fa-f]*')),
  bold INTEGER CHECK(bold IS NULL OR bold IN (0,1)),
+ deleted INTEGER NOT NULL DEFAULT 0 CHECK(deleted IN (0,1)),
  UNIQUE(category,name_key),
  CHECK((support_status='url' AND support_url IS NOT NULL) OR (support_status IN ('unknown','none') AND support_url IS NULL))
 );
+CREATE TABLE IF NOT EXISTS tag_categories (
+ id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, name_key TEXT NOT NULL UNIQUE,
+ revision INTEGER NOT NULL DEFAULT 1
+);
 CREATE TABLE IF NOT EXISTS tag_category_styles (
- category TEXT PRIMARY KEY CHECK(category IN ('author','video_type','axis_type','release_type','tier','duration','custom')),
+ category TEXT PRIMARY KEY CHECK(category IN ('author','video_type','axis_type','release_type','tier','duration','custom') OR category GLOB 'custom_[0-9]*'),
  color_light TEXT CHECK(color_light IS NULL OR (length(color_light)=7 AND substr(color_light,1,1)='#' AND substr(color_light,2) NOT GLOB '*[^0-9A-Fa-f]*')),
  color_dark TEXT CHECK(color_dark IS NULL OR (length(color_dark)=7 AND substr(color_dark,1,1)='#' AND substr(color_dark,2) NOT GLOB '*[^0-9A-Fa-f]*')),
  bold INTEGER CHECK(bold IS NULL OR bold IN (0,1)),
@@ -153,7 +158,7 @@ COVER_COLUMNS = (
 )
 INVENTORY_TABLES = (
     'works', 'directories', 'assets', 'covers', 'issues', 'tags', 'work_tags',
-    'work_tag_state', 'work_links', 'work_durations', 'release_calendar_plans', 'tag_category_styles',
+    'work_tag_state', 'work_links', 'work_durations', 'release_calendar_plans', 'tag_category_styles', 'tag_categories',
 )
 INVENTORY_SETTING_KEYS = ('root_catalog', 'last_scan')
 
@@ -170,8 +175,46 @@ def add_tag_color_schema(db):
     if 'bold' not in columns:
         db.execute('ALTER TABLE tags ADD COLUMN bold INTEGER CHECK(bold IS NULL OR bold IN (0,1))')
         db.execute('DROP TRIGGER IF EXISTS inventory_tags_update')
+    if 'deleted' not in columns:
+        db.execute('ALTER TABLE tags ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0 CHECK(deleted IN (0,1))')
+        db.execute('DROP TRIGGER IF EXISTS inventory_tags_update')
     for category in ('author', 'video_type', 'axis_type', 'release_type', 'tier', 'duration', 'custom'):
         db.execute('INSERT OR IGNORE INTO tag_category_styles(category) VALUES(?)', (category,))
+
+
+def add_dynamic_tag_categories(db):
+    tables = [(table, db.execute('SELECT sql FROM sqlite_master WHERE type=\'table\' AND name=?', (table,)).fetchone()[0])
+              for table in ('tags', 'tag_category_styles')]
+    outdated = [(table, definition) for table, definition in tables if "custom_" not in definition]
+    if not outdated:
+        return
+    db.commit()
+    db.execute('PRAGMA foreign_keys=OFF')
+    db.execute('BEGIN IMMEDIATE')
+    try:
+        for table, original in outdated:
+            temporary = table + '_dynamic'
+            expanded, replaced = re.subn(r'\bCREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:"' + table + r'"|`' + table + r'`|\[' + table + r'\]|' + table + r')\s*\(',
+                                         f'CREATE TABLE {temporary} (', original, count=1, flags=re.I)
+            expanded, widened = re.subn(r'CHECK\s*\(\s*(?:"category"|category)\s+IN\s*\(([^)]*)\)\s*\)',
+                                        r"CHECK(category IN (\1) OR category GLOB 'custom_[0-9]*')", expanded, count=1, flags=re.I)
+            if replaced != 1 or widened != 1:
+                raise RuntimeError('无法识别标签类别约束，原数据未变更')
+            objects = [row[0] for row in db.execute('SELECT sql FROM sqlite_master WHERE tbl_name=? AND type IN (\'index\',\'trigger\') AND sql IS NOT NULL', (table,))]
+            db.execute(expanded)
+            db.execute(f'INSERT INTO {temporary} SELECT * FROM {table}')
+            db.execute(f'DROP TABLE {table}')
+            db.execute(f'ALTER TABLE {temporary} RENAME TO {table}')
+            for definition in objects:
+                db.execute(definition)
+        if db.execute('PRAGMA foreign_key_check').fetchall():
+            raise RuntimeError('标签类别迁移发现无效关联，原数据未变更')
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.execute('PRAGMA foreign_keys=ON')
 
 
 def add_cover_schema(db):
@@ -301,6 +344,7 @@ class Store:
                 db.execute("ALTER TABLE jobs ADD COLUMN inputs TEXT NOT NULL DEFAULT '{}'")
             if 'video_asset_id' not in {row[1] for row in db.execute('PRAGMA table_info(preview_bindings)')}:
                 db.execute('ALTER TABLE preview_bindings ADD COLUMN video_asset_id INTEGER')
+            add_dynamic_tag_categories(db)
             # Migrate each platform once; subsequent restarts preserve manual choices.
             db.commit()
             db.execute('BEGIN IMMEDIATE')

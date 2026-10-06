@@ -187,17 +187,17 @@ class DurationService:
             return {'work_id': work_id, **duration_fields(db, work_id)}
 
     def sync_tag(self, db, work_id: int, minutes: int | None):
-        current = [row[0] for row in db.execute("SELECT wt.tag_id FROM work_tags wt JOIN tags t ON t.id=wt.tag_id WHERE wt.work_id=? AND t.category='duration'", (work_id,))]
+        current = [row[0] for row in db.execute("SELECT wt.tag_id FROM work_tags wt JOIN tags t ON t.id=wt.tag_id WHERE wt.work_id=? AND t.category='duration' AND t.deleted=0", (work_id,))]
         target = []
         if minutes is not None:
             name = f'{minutes} 分钟'
             db.execute("INSERT OR IGNORE INTO tags(category,name,name_key) VALUES('duration',?,?)", (name, name.casefold()))
-            tag_id = db.execute("SELECT id FROM tags WHERE category='duration' AND name_key=?", (name.casefold(),)).fetchone()[0]
-            target = [tag_id]
+            tag = db.execute("SELECT id,deleted FROM tags WHERE category='duration' AND name_key=?", (name.casefold(),)).fetchone()
+            target = [] if tag['deleted'] else [tag['id']]
         if current == target:
             return
         if current:
-            db.execute("DELETE FROM work_tags WHERE work_id=? AND tag_id IN (SELECT id FROM tags WHERE category='duration')", (work_id,))
+            db.execute("DELETE FROM work_tags WHERE work_id=? AND tag_id IN (SELECT id FROM tags WHERE category='duration' AND deleted=0)", (work_id,))
         if target:
             db.execute("INSERT INTO work_tags(work_id,tag_id,source) VALUES(?,?,'duration')", (work_id, target[0]))
         db.execute('INSERT INTO work_tag_state(work_id,revision) VALUES(?,1) ON CONFLICT(work_id) DO UPDATE SET revision=work_tag_state.revision+1', (work_id,))

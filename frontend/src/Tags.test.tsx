@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { TagChips, TagsPage, WorkTagEditor, tagColorStyle } from './Tags';
-import type { Tag, TagCategoryStyle, Work, WorkTags } from './api';
+import type { Tag, TagCategoryStyle, TagCategoryDefinition, Work, WorkTags } from './api';
 
 const makeTag = (id: number, category: Tag['category'], name: string): Tag => ({ id, category, name, revision: 1, usage_count: 0, support_status: 'unknown', support_url: null });
 const tags = [makeTag(1, 'author', '作者 A'), makeTag(2, 'author', '作者 B'), makeTag(3, 'video_type', 'Real'), makeTag(4, 'video_type', 'Anime'), makeTag(5, 'release_type', 'Paid'), makeTag(6, 'release_type', 'Free Sample'), makeTag(7, 'tier', 'Main Tier'), makeTag(8, 'tier', 'Free'), makeTag(9, 'custom', '短片'), makeTag(10, 'custom', '收藏')];
@@ -12,14 +12,30 @@ let fetchMock: ReturnType<typeof vi.fn>;
 let binding: WorkTags;
 let catalog: Tag[];
 let failStatus: number;
+let categoryDefinitions: TagCategoryDefinition[];
 let categoryStyles: TagCategoryStyle[];
 let importReport: Record<string, unknown> | null;
 
 beforeEach(() => {
   binding = { work_id: 7, tags: [], tags_revision: 2 }; catalog = tags.map(tag => ({ ...tag })); failStatus = 0; importReport = null;
-  categoryStyles = [];
+  categoryStyles = []; categoryDefinitions = [];
   localStorage.clear(); window.location.hash = '#/inventory';
   fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+    if (url === '/api/tag-categories' && init?.method === 'POST' || url.startsWith('/api/tag-categories/') && init?.method === 'PATCH') {
+      if (failStatus) return Promise.resolve(response({ detail: '分类已被其他页面修改' }, failStatus));
+      const data = JSON.parse(init!.body as string);
+      const category: Tag['category'] = init?.method === 'POST' ? `custom_${categoryDefinitions.length + 1}` : url.split('/').pop() as Tag['category'];
+      const value: TagCategoryDefinition = { category, name: data.name, is_custom: true, revision: (data.expected_revision || 0) + 1 };
+      categoryDefinitions = [...categoryDefinitions.filter(item => item.category !== category), value];
+      return Promise.resolve(response(value));
+    }
+    if (url.startsWith('/api/tags/') && (init?.method === 'DELETE' || init?.method === 'POST' && url.endsWith('/restore'))) {
+      if (failStatus) return Promise.resolve(response({ detail: '标签已被其他客户端修改' }, failStatus));
+      const id = Number(url.split('/')[3]); const existing = catalog.find(tag => tag.id === id)!;
+      const tag = { ...existing, deleted: init.method === 'DELETE', revision: existing.revision + 1 };
+      catalog = catalog.map(item => item.id === id ? tag : item);
+      return Promise.resolve(response({ tag, affected_work_count: tag.usage_count }));
+    }
     if (url.startsWith('/api/tag-category-styles/')) {
       const category = url.split('/').pop() as Tag['category'];
       let current = categoryStyles.find(style => style.category === category) || { category, color_light: null, color_dark: null, bold: null, revision: 0 };
@@ -35,7 +51,7 @@ beforeEach(() => {
       if (failStatus) return Promise.resolve(response({ detail: '资料有冲突' }, failStatus));
       return Promise.resolve(response({ ...catalog[0], ...JSON.parse(init!.body as string) }));
     }
-    if (url === '/api/tags') return Promise.resolve(response({ items: catalog.map(tag => ({ ...tag, category_style: categoryStyles.find(style => style.category === tag.category) })), category_styles: categoryStyles, categories: [], import_report: importReport }));
+    if (url === '/api/tags' || url === '/api/tags?include_deleted=1') return Promise.resolve(response({ category_definitions: categoryDefinitions, items: catalog.filter(tag => url.includes('include_deleted') || !tag.deleted).map(tag => ({ ...tag, category_style: categoryStyles.find(style => style.category === tag.category) })), category_styles: categoryStyles, categories: [], import_report: importReport }));
     if (url === '/api/works/7/tags') {
       if (init?.method === 'PUT') {
         if (failStatus) return Promise.resolve(response({ detail: '版本有冲突' }, failStatus));
@@ -428,5 +444,79 @@ describe('tag type styles and text weight', () => {
     fireEvent.click(screen.getByRole('button', { name: '保存资料' }));
     await waitFor(() => expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'PATCH').length).toBe(2));
     expect(JSON.parse(fetchMock.mock.calls.filter(([, init]) => init?.method === 'PATCH').at(-1)![1].body)).toMatchObject({ bold: null });
+  });
+});
+describe('custom categories and reversible tag deletion', () => {
+  it('creates and renames a stable custom category without replacing its tags', async () => {
+    const changed = vi.fn(); render(<TagsPage revision={0} onChanged={changed} />);
+    await screen.findByRole('button', { name: '编辑标签 作者 A' });
+    fireEvent.click(screen.getByRole('button', { name: '新增分类' }));
+    fireEvent.change(screen.getByLabelText('分类名称'), { target: { value: '系列' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存分类' }));
+    await screen.findByRole('button', { name: '系列 0' });
+    expect(categoryDefinitions[0]).toMatchObject({ category: 'custom_1', name: '系列', revision: 1 });
+    catalog.push({ ...makeTag(13, 'custom_1', '合集 A'), category_label: '系列' });
+    fireEvent.click(screen.getByRole('button', { name: '分类改名' }));
+    fireEvent.change(screen.getByLabelText('分类名称'), { target: { value: '作品系列' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存分类' }));
+    await screen.findByRole('button', { name: '作品系列 1' });
+    expect(screen.getByRole('button', { name: '编辑标签 合集 A' })).toBeTruthy();
+    const [, init] = fetchMock.mock.calls.find(([url, init]) => url === '/api/tag-categories/custom_1' && init?.method === 'PATCH')!;
+    expect(JSON.parse(init.body)).toEqual({ name: '作品系列', expected_revision: 1 });
+    expect(changed).toHaveBeenCalledTimes(2);
+  });
+
+  it('uses all custom categories in the transfer editor and renders custom tags', async () => {
+    categoryDefinitions = [{ category: 'custom_1', name: '系列', is_custom: true, revision: 1 }];
+    const tag = { ...makeTag(13, 'custom_1', '合集 A'), category_label: '系列' }; catalog.push(tag, { ...makeTag(14, 'custom_1', '合集 B'), category_label: '系列' });
+    render(<WorkTagEditor work={work} onClose={vi.fn()} onSaved={vi.fn()} />);
+    const option = await screen.findByRole('button', { name: '合集 A' });
+    expect(screen.getByRole('button', { name: '系列' })).toBeTruthy();
+    fireEvent.click(option);
+    await waitFor(() => expect(binding.tags.some(item => item.id === 13)).toBe(true));
+    fireEvent.click(screen.getByRole('button', { name: '合集 B' }));
+    await waitFor(() => expect(binding.tags.map(tag => tag.id)).toEqual([13, 14]));
+    cleanup(); render(<TagChips tags={[tag]} />);
+    expect(screen.getByText('合集 A')).toBeTruthy();
+    expect(screen.getByText('合集 A').getAttribute('title')).toContain('系列');
+  });
+
+  it('warns about linked works, deletes with revision protection, and supports immediate undo', async () => {
+    catalog[0].usage_count = 3; const changed = vi.fn(); render(<TagsPage revision={0} onChanged={changed} />);
+    fireEvent.click(await screen.findByRole('button', { name: '删除标签 作者 A' }));
+    expect(screen.getByRole('dialog').textContent).toContain('3 个作品');
+    fireEvent.click(screen.getByRole('button', { name: '确认删除' }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: '编辑标签 作者 A' })).toBeNull());
+    expect(catalog[0].deleted).toBe(true);
+    expect(JSON.parse(fetchMock.mock.calls.find(([, init]) => init?.method === 'DELETE')![1].body)).toEqual({ expected_revision: 1 });
+    fireEvent.click(screen.getByRole('button', { name: '撤销删除' }));
+    await screen.findByRole('button', { name: '编辑标签 作者 A' });
+    expect(catalog[0].deleted).toBe(false);
+    expect(changed).toHaveBeenCalledTimes(2);
+  });
+
+  it('restores from deleted tags and keeps deletion failures visible without losing the tag', async () => {
+    catalog[0].deleted = true; catalog[0].revision = 2;
+    render(<TagsPage revision={0} onChanged={vi.fn()} />);
+    await screen.findByRole('button', { name: '编辑标签 作者 B' });
+    fireEvent.click(screen.getByRole('button', { name: '已删除标签' }));
+    fireEvent.click(await screen.findByRole('button', { name: '恢复标签 作者 A' }));
+    await waitFor(() => expect(catalog[0].deleted).toBe(false));
+    fireEvent.click(screen.getByRole('button', { name: '返回标签库' }));
+    fireEvent.click(await screen.findByRole('button', { name: '删除标签 作者 A' }));
+    failStatus = 409; fireEvent.click(screen.getByRole('button', { name: '确认删除' }));
+    await screen.findByRole('alert');
+    expect(catalog[0].deleted).toBe(false);
+    expect(screen.getByRole('dialog')).toBeTruthy();
+  });
+
+  it('allows automatic duration deletion while keeping its values read-only', async () => {
+    catalog.push(makeTag(15, 'duration', '18 分钟')); render(<TagsPage revision={0} onChanged={vi.fn()} />);
+    await screen.findByRole('button', { name: '编辑标签 作者 A' });
+    fireEvent.click(screen.getByRole('button', { name: '时间 1' }));
+    expect(screen.queryByRole('button', { name: '编辑标签 18 分钟' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '删除标签 18 分钟' }));
+    fireEvent.click(screen.getByRole('button', { name: '确认删除' }));
+    await waitFor(() => expect(catalog.find(tag => tag.id === 15)?.deleted).toBe(true));
   });
 });

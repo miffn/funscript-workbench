@@ -127,7 +127,7 @@ class ScanRootsEdit(BaseModel):
 
 class TagCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    category: Literal["author", "video_type", "axis_type", "release_type", "tier", "duration", "custom"]
+    category: str = Field(strict=True, min_length=1, max_length=80)
     name: str = Field(strict=True, min_length=1, max_length=120)
     support_url: str | None = Field(default=None, strict=True, max_length=2000)
     support_status: Literal["unknown", "none", "url"] | None = None
@@ -153,6 +153,20 @@ class TagCategoryStyleEdit(BaseModel):
     color_light: TagColor = None
     color_dark: TagColor = None
     bold: bool | None = Field(default=None, strict=True)
+
+
+class TagCategoryCreate(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    name: str = Field(strict=True, min_length=1, max_length=120)
+
+
+class TagCategoryEdit(TagCategoryCreate):
+    expected_revision: int = Field(strict=True, ge=1)
+
+
+class TagDeletion(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    expected_revision: int = Field(strict=True, ge=1)
 
 
 class WorkTagsEdit(BaseModel):
@@ -388,7 +402,7 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
         if q.strip():
             # Literal search: % and _ in user text are not wildcard operators.
             term = q.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-            clauses.append("(script_id LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\' OR EXISTS(SELECT 1 FROM work_tags wt JOIN tags t ON t.id=wt.tag_id WHERE wt.work_id=works.id AND t.name_key LIKE ? ESCAPE '\\'))")
+            clauses.append("(script_id LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\' OR EXISTS(SELECT 1 FROM work_tags wt JOIN tags t ON t.id=wt.tag_id WHERE wt.work_id=works.id AND t.deleted=0 AND t.name_key LIKE ? ESCAPE '\\'))")
             values.extend([f"%{term}%", f"%{term}%", f"%{term.casefold()}%"])
         if status in status_filters:
             clauses.append(status_filters[status])
@@ -397,7 +411,7 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
         if untagged_only == "true":
             if selected_tags:
                 raise HTTPException(422, "按标签筛选不能同时只看无标签库存")
-            clauses.append("NOT EXISTS(SELECT 1 FROM work_tags wt JOIN tags t ON t.id=wt.tag_id WHERE wt.work_id=works.id AND t.category!='duration' AND (t.category!='axis_type' OR wt.source!='scan'))")
+            clauses.append("NOT EXISTS(SELECT 1 FROM work_tags wt JOIN tags t ON t.id=wt.tag_id WHERE wt.work_id=works.id AND t.deleted=0 AND t.category!='duration' AND (t.category!='axis_type' OR wt.source!='scan'))")
         query_key = (q.strip(), status, issues_only, tuple(sorted(selected_tags)),
                      untagged_only == 'true', sort_platform, sort_direction)
         if snapshot_id is not None:
@@ -409,7 +423,7 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
         def build(db):
             if selected_tags:
                 selected = sorted(selected_tags)
-                catalog = db.execute(f"SELECT id,category FROM tags WHERE id IN ({','.join('?' for _ in selected)})", selected).fetchall()
+                catalog = db.execute(f"SELECT id,category FROM tags WHERE deleted=0 AND id IN ({','.join('?' for _ in selected)})", selected).fetchall()
                 if len(catalog) != len(selected):
                     raise HTTPException(404, '筛选标签不存在')
                 categories = {}
@@ -506,8 +520,22 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
             return details(db, require_work(db, work_id), include_assets=True)
 
     @app.get("/api/tags")
-    def tag_catalog():
-        return tags.catalog()
+    def tag_catalog(include_deleted: bool = False):
+        return tags.catalog(include_deleted)
+
+    @app.post('/api/tag-categories', status_code=201)
+    def create_tag_category(options: TagCategoryCreate):
+        try:
+            return tags.create_category(options.name)
+        except TagError as error:
+            raise HTTPException(error.status_code, str(error))
+
+    @app.patch('/api/tag-categories/{category}')
+    def rename_tag_category(category: str, options: TagCategoryEdit):
+        try:
+            return tags.rename_category(category, options.name, options.expected_revision)
+        except TagError as error:
+            raise HTTPException(error.status_code, str(error))
 
     @app.get('/api/works/{work_id}/links')
     def work_links(work_id: int):
@@ -537,6 +565,20 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
     def edit_tag(tag_id: int, options: TagEdit):
         try:
             return tags.update(tag_id, options.model_dump(exclude_unset=True))
+        except TagError as error:
+            raise HTTPException(error.status_code, str(error))
+
+    @app.delete('/api/tags/{tag_id}')
+    def delete_tag(tag_id: int, options: TagDeletion):
+        try:
+            return tags.set_deleted(tag_id, True, options.expected_revision)
+        except TagError as error:
+            raise HTTPException(error.status_code, str(error))
+
+    @app.post('/api/tags/{tag_id}/restore')
+    def restore_tag(tag_id: int, options: TagDeletion):
+        try:
+            return tags.set_deleted(tag_id, False, options.expected_revision)
         except TagError as error:
             raise HTTPException(error.status_code, str(error))
 

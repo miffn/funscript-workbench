@@ -157,6 +157,7 @@ MUTATIONS = {
     'work_durations': ("INSERT INTO work_durations(work_id,total_seconds,updated_at) VALUES(4,60,'a')", 'UPDATE work_durations SET total_seconds=90 WHERE work_id=4', 'DELETE FROM work_durations WHERE work_id=4'),
     'release_calendar_plans': ("INSERT INTO release_calendar_plans(work_id,es_planned_date) VALUES(4,'2026-10-08')", "UPDATE release_calendar_plans SET es_planned_date='2026-10-09' WHERE work_id=4", 'DELETE FROM release_calendar_plans WHERE work_id=4'),
     'tag_category_styles': ("INSERT INTO tag_category_styles(category) VALUES('custom')", "UPDATE tag_category_styles SET bold=1 WHERE category='custom'", "DELETE FROM tag_category_styles WHERE category='custom'"),
+    'tag_categories': ("INSERT INTO tag_categories(id,name,name_key) VALUES(99,'Extra category','extra category')", "UPDATE tag_categories SET name='New category' WHERE id=99", 'DELETE FROM tag_categories WHERE id=99'),
     'settings': ("INSERT INTO settings(key,value) VALUES('last_scan','{}')", "UPDATE settings SET value='{} ' WHERE key='last_scan'", "DELETE FROM settings WHERE key='last_scan'"),
 }
 

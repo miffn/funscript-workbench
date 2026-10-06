@@ -6,9 +6,11 @@ export type Filter = 'all' | Status | 'to_make' | 'es_published' | 'patreon_publ
 export interface Issue { type: string; message: string; script_id?: string | null; work_id?: number | null; paths?: string[] }
 export interface Directory { id: number; windows_path: string; path: string; available: boolean }
 export interface Asset { id: number; name: string; relative_path: string; kind: string; axis?: string | null; size: number; directory_id: number }
-export type TagCategory = 'author' | 'video_type' | 'axis_type' | 'release_type' | 'tier' | 'duration' | 'custom';
+export type BuiltinTagCategory = 'author' | 'video_type' | 'axis_type' | 'release_type' | 'tier' | 'duration' | 'custom';
+export type TagCategory = BuiltinTagCategory | `custom_${string}`;
+export interface TagCategoryDefinition { category: TagCategory; name: string; is_custom: boolean; revision: number }
 export interface TagCategoryStyle { category: TagCategory; color_light: string | null; color_dark: string | null; bold: boolean | null; revision: number }
-export interface Tag { id: number; category: TagCategory; name: string; support_url: string | null; support_status: 'unknown' | 'none' | 'url'; revision: number; usage_count: number; support_candidates?: string[]; color_light?: string | null; color_dark?: string | null; bold?: boolean | null; category_style?: TagCategoryStyle }
+export interface Tag { id: number; category: TagCategory; name: string; category_label?: string; deleted?: boolean; support_url: string | null; support_status: 'unknown' | 'none' | 'url'; revision: number; usage_count: number; support_candidates?: string[]; color_light?: string | null; color_dark?: string | null; bold?: boolean | null; category_style?: TagCategoryStyle }
 export interface WorkTags { work_id: number; tags: Tag[]; tags_revision: number }
 export type WorkLinkKind = 'patreon' | 'video' | 'script' | 'es';
 export type WorkLinkValues = Record<WorkLinkKind, string>;
@@ -19,7 +21,7 @@ export interface WorkLinks {
   es_planned_date?: string | null; patreon_planned_date?: string | null;
   publication_revision?: string;
 }
-export interface TagCatalog { category_styles?: TagCategoryStyle[]; items: Tag[]; categories: string[]; import_report?: Record<string, unknown> | null }
+export interface TagCatalog { category_definitions?: TagCategoryDefinition[]; category_styles?: TagCategoryStyle[]; items: Tag[]; categories: string[]; import_report?: Record<string, unknown> | null }
 export interface Work {
   id: number; script_id: string | null; title: string; status: Status; video_type?: string | null; axis_type?: string | null;
   video_count: number; script_count: number; cover_url: string | null; issues: Issue[]; directories: Directory[];

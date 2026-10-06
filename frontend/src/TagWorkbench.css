@@ -48,3 +48,14 @@ html[data-theme=dark] :is(.tag-text-line,.tag-transfer,.tag-manager-layout,.inve
 .tag-color-settings .tag-inline-choices>span{font-size:12px;color:var(--muted);margin-right:4px}
 
 .tag-category-style-editor{margin:0 0 14px}
+
+.tag-table-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px}
+.tag-table-actions .tag-delete-action{color:var(--muted);min-width:26px;justify-content:center}
+.tag-table-actions .tag-delete-action:hover,.tag-delete-confirm{color:var(--error)}
+.tag-manager-categories>.tag-new-category{justify-content:flex-start;color:var(--primary);border-top:1px solid var(--line);border-radius:0;margin-top:7px}
+.tag-manager-actions{justify-content:flex-end}
+dialog.tag-dialog.tag-category-dialog,dialog.tag-dialog.tag-delete-dialog{width:min(520px,calc(100vw - 32px));height:auto;max-height:85dvh;padding:0;margin:auto;background:var(--surface);color:var(--text);border:1px solid var(--line);border-radius:14px;overflow:auto;box-shadow:0 20px 65px #0000002e}
+.tag-category-dialog .tag-dialog-body,.tag-delete-dialog .tag-dialog-body{padding:18px 20px}
+dialog.tag-category-dialog::backdrop,dialog.tag-delete-dialog::backdrop{background:#191c2645;backdrop-filter:blur(2px)}
+html[data-theme=dark] :is(dialog.tag-category-dialog,dialog.tag-delete-dialog)::backdrop{background:#00000066}
+@media(max-width:760px){.tag-table-row,.tag-table-head{grid-template-columns:minmax(0,1fr) 40px 90px}.tag-surface-head{flex-wrap:wrap}}

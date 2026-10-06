@@ -8,6 +8,7 @@ from .store import Store
 from .work_directory import current_directory
 
 CATEGORIES = ("author", "video_type", "axis_type", "release_type", "tier", "duration", "custom")
+CATEGORY_LABELS = dict(zip(CATEGORIES, ('作者', '视频类型', '轴类型', '发布类型', '档位', '时间', '自定义分类')))
 SINGLE_CATEGORIES = set(CATEGORIES) - {"custom"}
 RELEASE_NAMES = {"free sample": "Free Sample", "paid": "Paid"}
 TIER_NAMES = {"free": "Free", "main tier": "Main Tier", "extra tier": "Extra Tier"}
@@ -19,7 +20,7 @@ COLOR_FIELDS = ('color_light', 'color_dark')
 def sync_axis_tag(db, work_id: int, initialize=False):
     """Refresh an existing axis classification from the current source only."""
     state = db.execute("SELECT manual_edited FROM work_tag_state WHERE work_id=?", (work_id,)).fetchone()
-    current = db.execute("SELECT t.id,t.name,wt.source FROM tags t JOIN work_tags wt ON wt.tag_id=t.id WHERE wt.work_id=? AND t.category='axis_type'", (work_id,)).fetchone()
+    current = db.execute("SELECT t.id,t.name,wt.source FROM tags t JOIN work_tags wt ON wt.tag_id=t.id WHERE wt.work_id=? AND t.category='axis_type' AND t.deleted=0", (work_id,)).fetchone()
     if current and initialize:
         return
     # An explicit removal stays removed. Editing other categories must not freeze
@@ -45,7 +46,13 @@ def sync_axis_tag(db, work_id: int, initialize=False):
     if current and current["name"] == name:
         return
     db.execute("INSERT OR IGNORE INTO tags(category,name,name_key) VALUES('axis_type',?,?)", (name, name.casefold()))
-    tag_id = db.execute("SELECT id FROM tags WHERE category='axis_type' AND name_key=?", (name.casefold(),)).fetchone()[0]
+    target = db.execute("SELECT id,deleted FROM tags WHERE category='axis_type' AND name_key=?", (name.casefold(),)).fetchone()
+    if target['deleted']:
+        if current:
+            db.execute('DELETE FROM work_tags WHERE work_id=? AND tag_id=?', (work_id, current['id']))
+            db.execute('INSERT INTO work_tag_state(work_id,revision) VALUES(?,1) ON CONFLICT(work_id) DO UPDATE SET revision=work_tag_state.revision+1', (work_id,))
+        return
+    tag_id = target['id']
     if current:
         db.execute("DELETE FROM work_tags WHERE work_id=? AND tag_id=?", (work_id, current["id"]))
     db.execute("INSERT INTO work_tags(work_id,tag_id,source) VALUES(?,?,?)", (work_id, tag_id, "scan" if axes else "import"))
@@ -72,8 +79,13 @@ def validate_bold(value: bool | None) -> bool | None:
     return value
 
 
+def custom_category_id(category):
+    match = re.fullmatch(r'custom_([1-9][0-9]{0,18})', category) if isinstance(category, str) else None
+    return int(match[1]) if match and int(match[1]) <= 9223372036854775807 else None
+
+
 def validate_name(category: str, name: str) -> str:
-    if category not in CATEGORIES:
+    if category not in CATEGORIES and custom_category_id(category) is None:
         raise TagError("标签类别无效")
     if not isinstance(name, str):
         raise TagError("标签名称必须是文字")
@@ -159,16 +171,60 @@ class TagService:
                     sync_axis_tag(db, work[0], initialize=True)
                 db.execute("INSERT INTO settings(key,value) VALUES('axis_tags_initialized','true')")
 
-    def category_styles(self, db) -> dict[str, dict]:
+    def category_definitions(self, db) -> list[dict]:
+        return [{'category': category, 'name': CATEGORY_LABELS[category], 'is_custom': False, 'revision': 0} for category in CATEGORIES] + [
+            {'category': f'custom_{row["id"]}', 'name': row['name'], 'is_custom': True, 'revision': row['revision']}
+            for row in db.execute('SELECT * FROM tag_categories ORDER BY id')]
+
+    def require_category(self, db, category):
+        if category in CATEGORIES:
+            return
+        category_id = custom_category_id(category)
+        if category_id is None or not db.execute('SELECT 1 FROM tag_categories WHERE id=?', (category_id,)).fetchone():
+            raise TagError('标签类别不存在')
+
+    def create_category(self, name: str) -> dict:
+        name = validate_name('custom', name)
+        if name.casefold() in {label.casefold() for label in CATEGORY_LABELS.values()}:
+            raise TagError('该类别名称已由系统使用')
+        with self.store.connection() as db:
+            db.execute('BEGIN IMMEDIATE')
+            if db.execute('SELECT 1 FROM tag_categories WHERE name_key=?', (name.casefold(),)).fetchone():
+                raise TagError('已存在同名标签类别', 409)
+            category_id = db.execute('INSERT INTO tag_categories(name,name_key) VALUES(?,?)', (name, name.casefold())).lastrowid
+            category = f'custom_{category_id}'
+            db.execute('INSERT INTO tag_category_styles(category) VALUES(?)', (category,))
+            return {'category': category, 'name': name, 'is_custom': True, 'revision': 1}
+
+    def rename_category(self, category: str, name: str, expected_revision: int) -> dict:
+        name = validate_name('custom', name)
+        if name.casefold() in {label.casefold() for label in CATEGORY_LABELS.values()}:
+            raise TagError('该类别名称已由系统使用')
+        with self.store.connection() as db:
+            db.execute('BEGIN IMMEDIATE')
+            self.require_category(db, category)
+            category_id = custom_category_id(category)
+            if category_id is None:
+                raise TagError('系统标签类别不能重命名')
+            row = db.execute('SELECT * FROM tag_categories WHERE id=?', (category_id,)).fetchone()
+            if row['revision'] != expected_revision:
+                raise TagError('标签类别已被其他客户端修改，请刷新后重试', 409)
+            if db.execute('SELECT 1 FROM tag_categories WHERE name_key=? AND id!=?', (name.casefold(), category_id)).fetchone():
+                raise TagError('已存在同名标签类别', 409)
+            if name != row['name']:
+                db.execute('UPDATE tag_categories SET name=?,name_key=?,revision=revision+1 WHERE id=?', (name, name.casefold(), category_id))
+            current = db.execute('SELECT * FROM tag_categories WHERE id=?', (category_id,)).fetchone()
+            return {'category': category, 'name': current['name'], 'is_custom': True, 'revision': current['revision']}
+
+    def category_styles(self, db, definitions=None) -> dict[str, dict]:
         rows = {row['category']: dict(row) for row in db.execute('SELECT * FROM tag_category_styles')}
         return {category: {**rows.get(category, {'category': category, 'color_light': None,
                                                 'color_dark': None, 'bold': None, 'revision': 0}),
                            'bold': bool(rows[category]['bold']) if category in rows and rows[category]['bold'] is not None else None}
-                for category in CATEGORIES}
+                for category in (item['category'] for item in (definitions or self.category_definitions(db)))}
 
     def category_style(self, db, category: str) -> dict:
-        if category not in CATEGORIES:
-            raise TagError('标签类别无效')
+        self.require_category(db, category)
         return self.category_styles(db)[category]
 
     def update_category_style(self, category: str, changes: dict) -> dict:
@@ -186,22 +242,28 @@ class TagService:
                            (category, *colors, bold, current['revision'] + 1))
             return self.category_style(db, category)
 
-    def tag(self, db, tag_id: int, category_styles: dict | None = None) -> dict:
+    def tag(self, db, tag_id: int, category_styles: dict | None = None, category_labels=None, include_deleted=False) -> dict:
         row = db.execute("SELECT t.*,count(wt.work_id) AS usage_count FROM tags t LEFT JOIN work_tags wt ON wt.tag_id=t.id WHERE t.id=? GROUP BY t.id", (tag_id,)).fetchone()
-        if row is None:
+        if row is None or row['deleted'] and not include_deleted:
             raise TagError("标签不存在", 404)
         result = {key: row[key] for key in ("id", "category", "name", "support_url", "support_status", "revision", "usage_count", *COLOR_FIELDS)}
         result['bold'] = bool(row['bold']) if row['bold'] is not None else None
         result['category_style'] = (category_styles or self.category_styles(db))[row['category']]
+        labels = category_labels or {item['category']: item['name'] for item in self.category_definitions(db)}
+        result['category_label'] = labels[row['category']]
+        result['deleted'] = bool(row['deleted'])
         result["support_candidates"] = json.loads(row["support_candidates"])
         return result
 
-    def catalog(self) -> dict:
+    def catalog(self, include_deleted=False) -> dict:
         with self.store.connection() as db:
-            styles = self.category_styles(db)
-            ids = [row[0] for row in db.execute("SELECT id FROM tags ORDER BY category,name_key")]
+            definitions = self.category_definitions(db)
+            styles = self.category_styles(db, definitions)
+            labels = {item['category']: item['name'] for item in definitions}
+            ids = [row[0] for row in db.execute('SELECT id FROM tags' + ('' if include_deleted else ' WHERE deleted=0') + ' ORDER BY category,name_key')]
             report = db.execute("SELECT value FROM settings WHERE key='tag_import_report'").fetchone()
-            return {"items": [self.tag(db, tag_id, styles) for tag_id in ids], "categories": list(CATEGORIES),
+            return {"items": [self.tag(db, tag_id, styles, labels, include_deleted) for tag_id in ids], "categories": list(labels),
+                    'category_definitions': definitions,
                     'category_styles': list(styles.values()),
                     "import_report": json.loads(report[0]) if report else None}
 
@@ -209,9 +271,11 @@ class TagService:
         if not db.execute("SELECT 1 FROM works WHERE id=?", (work_id,)).fetchone():
             raise TagError("库存编号不存在", 404)
         row = db.execute("SELECT * FROM work_tag_state WHERE work_id=?", (work_id,)).fetchone()
-        ids = [row[0] for row in db.execute("SELECT wt.tag_id FROM work_tags wt JOIN tags t ON t.id=wt.tag_id WHERE wt.work_id=? ORDER BY t.category,t.name_key", (work_id,))]
-        styles = self.category_styles(db)
-        return {"work_id": work_id, "tags": [self.tag(db, tag_id, styles) for tag_id in ids], "tags_revision": row["revision"] if row else 0}
+        ids = [row[0] for row in db.execute("SELECT wt.tag_id FROM work_tags wt JOIN tags t ON t.id=wt.tag_id WHERE wt.work_id=? AND t.deleted=0 ORDER BY t.category,t.name_key", (work_id,))]
+        definitions = self.category_definitions(db)
+        styles = self.category_styles(db, definitions)
+        labels = {item['category']: item['name'] for item in definitions}
+        return {"work_id": work_id, "tags": [self.tag(db, tag_id, styles, labels) for tag_id in ids], "tags_revision": row["revision"] if row else 0}
 
     def create(self, changes: dict) -> dict:
         category = changes["category"]
@@ -223,6 +287,7 @@ class TagService:
         bold = validate_bold(changes.get('bold'))
         with self.store.connection() as db:
             db.execute("BEGIN IMMEDIATE")
+            self.require_category(db, category)
             if db.execute("SELECT id FROM tags WHERE category=? AND name_key=?", (category, name.casefold())).fetchone():
                 raise TagError("该类别中已存在同名标签，请使用已有标签", 409)
             manual = category == "author" and any(key in changes for key in ("support_url", "support_status"))
@@ -237,6 +302,8 @@ class TagService:
             if row is None:
                 raise TagError("标签不存在", 404)
             current = dict(row)
+            if current['deleted']:
+                raise TagError('标签已删除，请先恢复', 409)
             if current['category'] == 'duration':
                 raise TagError('时间标签由源视频自动计算，不能手动修改')
             if changes["expected_revision"] != current["revision"]:
@@ -253,7 +320,7 @@ class TagService:
             # Renaming an enum label may change validity of every linked work.
             if current["category"] in {"release_type", "tier"} and name != current["name"]:
                 for work in db.execute("SELECT work_id FROM work_tags WHERE tag_id=?", (tag_id,)).fetchall():
-                    selection = [dict(value) for value in db.execute("SELECT t.* FROM tags t JOIN work_tags wt ON wt.tag_id=t.id WHERE wt.work_id=?", (work[0],))]
+                    selection = [dict(value) for value in db.execute("SELECT t.* FROM tags t JOIN work_tags wt ON wt.tag_id=t.id WHERE wt.work_id=? AND t.deleted=0", (work[0],))]
                     for selected in selection:
                         if selected["id"] == tag_id:
                             selected["name"] = name
@@ -287,7 +354,28 @@ class TagService:
             selected = [tag for tag in selected if tag['category'] != 'duration']
             validate_selection(selected)
             tag_ids = [tag['id'] for tag in selected]
-            db.execute("DELETE FROM work_tags WHERE work_id=? AND tag_id IN (SELECT id FROM tags WHERE category!='duration')", (work_id,))
+            db.execute("DELETE FROM work_tags WHERE work_id=? AND tag_id IN (SELECT id FROM tags WHERE category!='duration' AND deleted=0)", (work_id,))
             db.executemany("INSERT INTO work_tags(work_id,tag_id,source) VALUES(?,?,'manual')", [(work_id, tag_id) for tag_id in tag_ids])
             db.execute("INSERT INTO work_tag_state(work_id,revision,manual_edited) VALUES(?,?,1) ON CONFLICT(work_id) DO UPDATE SET revision=excluded.revision,manual_edited=1", (work_id, state["tags_revision"] + 1))
             return self.work_state(db, work_id)
+
+    def set_deleted(self, tag_id: int, deleted: bool, expected_revision: int) -> dict:
+        with self.store.connection() as db:
+            db.execute('BEGIN IMMEDIATE')
+            tag = self.tag(db, tag_id, include_deleted=True)
+            if tag['revision'] != expected_revision:
+                raise TagError('标签已被其他客户端修改，请刷新后重试', 409)
+            works = [row[0] for row in db.execute('SELECT work_id FROM work_tags WHERE tag_id=?', (tag_id,))]
+            if tag['deleted'] != deleted:
+                if not deleted:
+                    for work_id in works:
+                        selected = [dict(row) for row in db.execute('SELECT t.* FROM tags t JOIN work_tags wt ON wt.tag_id=t.id '
+                                                                    'WHERE wt.work_id=? AND t.deleted=0', (work_id,))]
+                        try:
+                            validate_selection([*selected, tag])
+                        except TagError as error:
+                            raise TagError(f'恢复标签会与现有分类冲突，请先调整关联作品标签：{error}', 409) from error
+                db.execute('UPDATE tags SET deleted=?,revision=revision+1 WHERE id=?', (int(deleted), tag_id))
+                db.execute('INSERT INTO work_tag_state(work_id,revision) SELECT work_id,1 FROM work_tags WHERE tag_id=? '
+                           'ON CONFLICT(work_id) DO UPDATE SET revision=work_tag_state.revision+1', (tag_id,))
+            return {'tag': self.tag(db, tag_id, include_deleted=True), 'affected_work_count': len(works)}

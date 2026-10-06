@@ -10,7 +10,7 @@ import sys
 from .config import normalize_id
 from .scanner import rows_of, pick
 from .store import Store, now
-from .tags import TagError, validate_name, validate_url, validate_selection
+from .tags import TagError, SINGLE_CATEGORIES, validate_name, validate_url, validate_selection
 
 FIELDS = {
     "author": ("Creator", "Author", "作者"),
@@ -40,7 +40,7 @@ def database_state(db) -> tuple[dict, dict, dict, dict]:
     bindings = {}
     if "work_tags" in tables:
         for row in db.execute("SELECT * FROM work_tags"):
-            if row["tag_id"] in by_id:
+            if row["tag_id"] in by_id and not by_id[row['tag_id']].get('deleted'):
                 bindings.setdefault(row["work_id"], []).append({**by_id[row["tag_id"]], "binding_source": row["source"]})
     states = {row["work_id"]: dict(row) for row in db.execute("SELECT * FROM work_tag_state")} if "work_tag_state" in tables else {}
     return works, tags, bindings, states
@@ -108,11 +108,15 @@ def plan_import(db, monthly: object, master: object) -> dict:
                                   "message": "优先来源内存在不同值，暂不绑定该分类" if len(unique) > 1 else f"两表字段不同，按 {preferred} 优先采用 {next(iter(unique.values()))}"})
             if len(unique) == 1:
                 name = next(iter(unique.values()))
+                if existing.get(tag_key(category, name), {}).get('deleted'):
+                    continue
                 selected[script_id][category] = {"category": category, "name": name, "key": tag_key(category, name), "provenance": entries}
     tag_plans = {}
     for creator in authors.values():
         key = tag_key("author", creator["name"])
         current = existing.get(key)
+        if current and current.get('deleted'):
+            continue
         candidates = set(creator["urls"])
         if current and not current["support_manual"]:
             candidates.update(json.loads(current["support_candidates"]))
@@ -163,9 +167,9 @@ def plan_import(db, monthly: object, master: object) -> dict:
         elif script_id not in records:
             entry.update(action="no_data", reason="两表没有这个完整编号的资料")
         else:
-            desired = {tag["category"]: tag_key(tag["category"], tag["name"]) for tag in before if tag["category"] != "custom"}
+            desired = {tag["category"]: tag_key(tag["category"], tag["name"]) for tag in before if tag["category"] in SINGLE_CATEGORIES}
             desired.update({category: value["key"] for category, value in selected_fields.items()})
-            desired_custom = [tag_key(tag["category"], tag["name"]) for tag in before if tag["category"] == "custom"]
+            desired_custom = [tag_key(tag["category"], tag["name"]) for tag in before if tag["category"] not in SINGLE_CATEGORIES]
             desired_keys = list(desired.values()) + desired_custom
             try:
                 validate_selection([tag_plans.get(key, existing.get(key)) for key in desired_keys])
@@ -214,13 +218,13 @@ def import_tags(data_dir: Path, monthly: object, master: object, dry_run=False) 
                 db.execute("INSERT INTO tags(category,name,name_key,support_url,support_status,support_candidates,provenance) VALUES(?,?,?,?,?,?,?)",
                            (plan["category"], plan["name"], plan["name"].casefold(), plan["support_url"], plan["support_status"], json.dumps(plan["support_candidates"]), json.dumps(plan["provenance"], ensure_ascii=False)))
             elif plan["action"] == "update":
-                db.execute("UPDATE tags SET support_status=?,support_url=?,support_candidates=?,provenance=?,revision=revision+1 WHERE category=? AND name_key=? AND support_manual=0",
+                db.execute("UPDATE tags SET support_status=?,support_url=?,support_candidates=?,provenance=?,revision=revision+1 WHERE category=? AND name_key=? AND support_manual=0 AND deleted=0",
                            (plan["support_status"], plan["support_url"], json.dumps(plan["support_candidates"]), json.dumps(plan["provenance"], ensure_ascii=False), plan["category"], plan["name"].casefold()))
-        keys = {tag_key(row["category"], row["name"]): row["id"] for row in db.execute("SELECT id,category,name FROM tags")}
+        keys = {tag_key(row["category"], row["name"]): row["id"] for row in db.execute("SELECT id,category,name FROM tags WHERE deleted=0")}
         for plan in report["plans"]:
             if plan["action"] != "bind":
                 continue
-            db.execute("DELETE FROM work_tags WHERE work_id=? AND tag_id IN (SELECT id FROM tags WHERE category!='duration')", (plan["work_id"],))
+            db.execute("DELETE FROM work_tags WHERE work_id=? AND tag_id IN (SELECT id FROM tags WHERE category!='duration' AND deleted=0)", (plan["work_id"],))
             for key in plan["after_tags"]:
                 if db.execute("SELECT id FROM tags WHERE id=? AND category='duration'", (keys[key],)).fetchone():
                     continue
