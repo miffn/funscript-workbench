@@ -18,7 +18,7 @@
 wsl --install -d Ubuntu-24.04
 ```
 
-按提示重启，打开 Ubuntu 创建 Linux 用户。安装命令见 [Microsoft WSL 安装说明](https://learn.microsoft.com/windows/wsl/install)。本文使用用户 `admin`、项目目录 `/home/user/projects/script-workbench`；使用其他用户名时，同步替换后文的 Linux 和 UNC 路径。
+按提示重启，打开 Ubuntu 创建 Linux 用户。安装命令见 [Microsoft WSL 安装说明](https://learn.microsoft.com/windows/wsl/install)。项目目录使用 `~/projects/script-workbench`。Windows UNC 示例中的 `<Linux用户名>` 和 `<Windows IPv4>` 必须替换为自己的实际值。
 
 Windows 另外安装 **Python 3.12**（包含 `py` 启动器），仅用于网关，不需要安装后端依赖。在 Windows PowerShell 确认 Python 可用：
 
@@ -60,19 +60,12 @@ Node.js 和 npm 安装在 WSL 中；仅安装 Windows Node.js 不能替代这一
 
 ## 3. 获取代码并构建
 
-先在 WSL 创建 SSH 密钥，将公钥添加到自己的 Forgejo 账户：
+在 WSL 从公开 GitHub 仓库获取代码：
 
 ```bash
-ssh-keygen -t ed25519 -C "workbench"
-cat ~/.ssh/id_ed25519.pub
-```
-
-然后克隆仓库。下面使用本机 NAS 的完整 SSH 地址，不依赖 SSH 主机别名：
-
-```bash
-mkdir -p /home/user/projects
-git clone https://github.com/miffn/funscript-workbench.git /home/user/projects/script-workbench
-cd /home/user/projects/script-workbench
+mkdir -p ~/projects
+git clone https://github.com/miffn/funscript-workbench.git ~/projects/script-workbench
+cd ~/projects/script-workbench
 
 python3.12 -m venv .venv
 .venv/bin/python -m pip install -r backend/requirements.txt
@@ -91,7 +84,7 @@ cmake --build preview_generator/build -j4
 在 Ubuntu 项目目录生成本机网关密钥，并安装用户服务：
 
 ```bash
-cd /home/user/projects/script-workbench
+cd ~/projects/script-workbench
 .venv/bin/python - <<'PY'
 from pathlib import Path
 import secrets
@@ -116,11 +109,11 @@ curl --fail http://127.0.0.1:8789/api/health
 先保留 Ubuntu 终端，在 Windows PowerShell 执行。将局域网地址替换为这台 Windows 电脑的 IPv4，可用 `ipconfig` 查看：
 
 ```powershell
-$projectPath = '\\wsl.localhost\Ubuntu-24.04\home\user\projects\script-workbench'
+$projectPath = '\\wsl.localhost\Ubuntu-24.04\home\<Linux用户名>\projects\script-workbench'
 $pythonPath = (& py -3.12 -c 'import sys; print(sys.executable)').Trim()
 
 & $pythonPath "$projectPath\scripts\windows_gateway.py" `
-  --lan-host '192.0.2.6' `
+  --lan-host '<Windows IPv4>' `
   --host-key-file "$projectPath\data\host.key"
 ```
 
@@ -145,7 +138,7 @@ Windows 网络应设为“专用”，手机或其他电脑连接同一局域网
 ## 6. 第一次使用
 
 1. 打开 `http://localhost:8788/`，进入「设置 → 本地资料库」。
-2. 添加素材目录，例如 `D:\Media\workspace`。目录需在 WSL 中可读；新目录默认按文件夹识别，也可选择按编号识别。
+2. 添加素材目录，例如 `D:\Media\Workspace`。目录需在 WSL 中可读；新目录默认按文件夹识别，也可选择按编号识别。
 3. 保存目录，回到库存点击「立即扫描」。保存目录本身不会触发扫描。
 4. 扫描完成后维护标题、标签和发布信息。自定义分类在「标签管理 → 新增分类」创建。
 5. 打开作品，在「预览生成与匹配」核对视频与各轴脚本，生成并查看预览。本机还可打开预览所在目录。
@@ -185,7 +178,7 @@ systemctl --user restart script-workbench.service
 先在第 5 节的前台网关窗口按 `Ctrl+C` 停止网关，避免重复占用端口。再在 Windows PowerShell 执行：
 
 ```powershell
-$projectPath = '\\wsl.localhost\Ubuntu-24.04\home\user\projects\script-workbench'
+$projectPath = '\\wsl.localhost\Ubuntu-24.04\home\<Linux用户名>\projects\script-workbench'
 $pythonPath = (& py -3.12 -c 'import sys; print(sys.executable)').Trim()
 $runtimePath = Join-Path $env:ProgramData 'ScriptWorkbench'
 
@@ -193,7 +186,7 @@ New-Item -ItemType Directory -Path $runtimePath -Force | Out-Null
 Copy-Item -LiteralPath "$projectPath\scripts\Install-Autostart.ps1" `
   -Destination "$runtimePath\Install-Autostart.ps1" -Force
 & "$runtimePath\Install-Autostart.ps1" -ProjectPath $projectPath `
-  -LanHost '192.0.2.6' -PythonPath $pythonPath
+  -LanHost '<Windows IPv4>' -PythonPath $pythonPath
 ```
 
 安装器创建并立即启动计划任务 `ScriptWorkbench`。以后在当前用户登录后延迟 15 秒启动，自动保持 WSL 运行并恢复异常退出。安装完成后可以关闭 Ubuntu、PowerShell、Codex 和浏览器。未登录 Windows 时，登录任务不会运行。
@@ -221,7 +214,7 @@ Invoke-RestMethod 'http://localhost:8788/api/capabilities'
 已配置自启动时，停止服务：
 
 ```powershell
-$projectPath = '\\wsl.localhost\Ubuntu-24.04\home\user\projects\script-workbench'
+$projectPath = '\\wsl.localhost\Ubuntu-24.04\home\<Linux用户名>\projects\script-workbench'
 & "$env:ProgramData\ScriptWorkbench\Stop-Workbench.ps1" -ProjectPath $projectPath
 ```
 
