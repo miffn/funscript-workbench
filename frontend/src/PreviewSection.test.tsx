@@ -61,28 +61,29 @@ beforeEach(() => {
 afterEach(() => { vi.useRealTimers(); cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe('inline generated media preview', () => {
-  it('keeps reassociated preview downloads and clears the stale notice when regeneration finishes', async () => {
+  it('keeps reassociated preview view controls and clears the stale notice when regeneration finishes', async () => {
     vi.useFakeTimers(); state = { ...empty, stale: true, files: outputFiles };
     render(<PreviewSection work={{ ...work, script_id: null, title: '普通文件夹', preview_stale: true }} capabilities={remote} />);
     await act(async () => { await Promise.resolve(); });
     expect(screen.getByText('素材目录已重新关联，旧手动对应关系已失效。请先核对源视频和全部轴脚本，再重新生成预览。旧预览仍可查看。')).toBeTruthy();
-    expect(screen.getAllByRole('link')).toHaveLength(8);
+    expect(document.querySelectorAll('.preview-view-button')).toHaveLength(8);
     state = { ...state, stale: false };
     await act(async () => { await vi.advanceTimersByTimeAsync(10000); });
     expect(screen.queryByText('素材目录已重新关联，旧手动对应关系已失效。请先核对源视频和全部轴脚本，再重新生成预览。旧预览仍可查看。')).toBeNull();
-    expect(screen.getAllByRole('link')).toHaveLength(8);
+    expect(document.querySelectorAll('.preview-view-button')).toHaveLength(8);
   });
   const heatmap: PreviewFile = { filename: '热力图.png', kind: 'heatmap', clip_index: 0, width: 2048, height: 690, size: 4096, url: '/api/works/7/preview/files/heatmap.png?v=first' };
-  it('loads only the requested video, GIF or heatmap and keeps separate download links', async () => {
+  it('loads only the requested video, GIF or heatmap and has no download links', async () => {
     state = { ...empty, files: [...outputFiles.map(file => ({ ...file, url: `${file.url}?v=first` })), heatmap] };
     render(<PreviewSection work={work} capabilities={remote} />);
     await screen.findByRole('button', { name: '查看完整时长热力图' });
     expect(document.querySelector('video, img')).toBeNull();
-    expect(screen.getAllByRole('link')).toHaveLength(9);
+    expect(document.querySelectorAll('.preview-view-button')).toHaveLength(9);
     fireEvent.click(screen.getByRole('button', { name: '查看片段 1 WebM' }));
     const video = document.querySelector('video')!;
     expect(video.getAttribute('src')).toBe(`${outputFiles[0].url}?v=first&inline=1`);
     expect(video.controls).toBe(true);
+    expect(video.getAttribute('controlslist')).toBe('nodownload');
     expect(video.preload).toBe('metadata');
     expect(video.autoplay).toBe(false);
     expect(video.hasAttribute('playsinline')).toBe(true);
@@ -103,11 +104,11 @@ describe('inline generated media preview', () => {
     expect(document.querySelector('.inline-preview-media.zoomed')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '适应宽度' }));
     expect(document.querySelector('.inline-preview-media.zoomed')).toBeNull();
-    expect(screen.getByRole('link', { name: '下载完整时长热力图' }).getAttribute('href')).toBe(heatmap.url);
+    expect(document.querySelector('a[download]')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: '关闭内容预览' }));
     expect(document.querySelector('video, img')).toBeNull();
-    expect(screen.getAllByRole('link')).toHaveLength(9);
-    expect(screen.getAllByRole('link').every(link => link.hasAttribute('download'))).toBe(true);
+    expect(document.querySelectorAll('.preview-view-button')).toHaveLength(9);
+    expect(document.querySelector('a[download]')).toBeNull();
   });
 
   it('keeps the selected media during polling and remounts it when its version changes', async () => {
@@ -130,14 +131,14 @@ describe('inline generated media preview', () => {
     expect(screen.getByRole('button', { name: '查看片段 1 WebM' }).getAttribute('aria-pressed')).toBe('true');
   });
 
-  it('shows media errors without removing downloads and closing stops the video', async () => {
+  it('shows media errors while keeping view controls and closing stops the video', async () => {
     state = { ...empty, files: outputFiles };
     const view = render(<PreviewSection work={work} capabilities={local} />);
     fireEvent.click(await screen.findByRole('button', { name: '查看片段 2 WebM' }));
     fireEvent.error(document.querySelector('video')!);
     expect(screen.getByText(/内容加载失败/)).toBeTruthy();
     expect(screen.queryByText(/正在加载片段/)).toBeNull();
-    expect(screen.getAllByRole('link')).toHaveLength(9);
+    expect(document.querySelectorAll('.preview-view-button')).toHaveLength(8);
     view.unmount();
     expect(HTMLMediaElement.prototype.pause).toHaveBeenCalledOnce();
     expect(HTMLMediaElement.prototype.load).toHaveBeenCalledOnce();
@@ -149,8 +150,9 @@ describe('preview generation workflow', () => {
     state = { ...empty, files: [...outputFiles, { filename: '热力图.png', kind: 'heatmap', clip_index: 0,
       width: 2048, height: 1002, size: 4096, url: '/api/works/7/preview/files/heatmap.png' }] };
     render(<PreviewSection work={work} capabilities={local} />);
-    const png = await screen.findByRole('link', { name: /完整时长热力图/ });
-    expect(png.getAttribute('download')).toBe('热力图.png');
+    const png = await screen.findByRole('button', { name: '查看完整时长热力图' });
+    expect(png.tagName).toBe('BUTTON');
+    expect(document.querySelector('a[download]')).toBeNull();
     expect(screen.getByText('9 个文件')).toBeTruthy();
     expect(document.querySelectorAll('.preview-clip')).toHaveLength(5);
     expect(document.querySelectorAll('.preview-clip > span')[4].textContent).toBe('热力图');
@@ -174,7 +176,7 @@ describe('preview generation workflow', () => {
     expect((screen.getByRole('progressbar') as HTMLProgressElement).value).toBe(37);
     expect((notes as HTMLTextAreaElement).value).toBe('没有保存的备注');
     state = { ...state, job: { ...job, status: 'completed', progress: 100 }, files: outputFiles };
-    await waitFor(() => expect(screen.getAllByRole('link')).toHaveLength(8), { timeout: 3000 });
+    await waitFor(() => expect(document.querySelectorAll('.preview-view-button')).toHaveLength(8), { timeout: 3000 });
     expect(screen.queryByRole('progressbar')).toBeNull();
     expect((notes as HTMLTextAreaElement).value).toBe('没有保存的备注');
     expect(document.querySelector('video')).toBeNull();
@@ -212,7 +214,7 @@ describe('preview generation workflow', () => {
   it('keeps completed CLI results with no job and blocks folder opening on remote clients', async () => {
     state = { ...empty, files: outputFiles };
     render(<PreviewSection work={work} capabilities={remote} />);
-    await waitFor(() => expect(screen.getAllByRole('link')).toHaveLength(8));
+    await waitFor(() => expect(document.querySelectorAll('.preview-view-button')).toHaveLength(8));
     expect(screen.getByRole('button', { name: '一键生成预览' })).toBeTruthy();
     expect(screen.getByText(/已有且输入未变化的结果会复用/)).toBeTruthy();
     expect(screen.getByText(/现有结果尚无热力图/)).toBeTruthy();
@@ -221,14 +223,14 @@ describe('preview generation workflow', () => {
     fireEvent.click(open);
     expect(fetchMock.mock.calls.some(([url]) => url.endsWith('/open-folder'))).toBe(false);
     expect(screen.getByText('不支持打开预览文件夹，仅素材所在主机可用。')).toBeTruthy();
-    expect(screen.getAllByRole('link').every(link => link.hasAttribute('download'))).toBe(true);
+    expect(document.querySelector('a[download]')).toBeNull();
   });
 
   it('retains prior files on a failed generation and allows retry without inventing success', async () => {
     state = { ...empty, job: { ...job, status: 'failed', error: '缺少同名脚本', progress: 14 }, files: outputFiles };
     render(<PreviewSection work={work} capabilities={local} />);
     await screen.findByText(/预览生成失败：缺少同名脚本/);
-    expect(screen.getAllByRole('link')).toHaveLength(8);
+    expect(document.querySelectorAll('.preview-view-button')).toHaveLength(8);
     fireEvent.click(screen.getByRole('button', { name: '重试生成预览' }));
     await screen.findByText('37%');
     expect(postCount).toBe(1);
@@ -260,7 +262,7 @@ describe('preview generation workflow', () => {
 });
 
 describe('file mapping and forced regeneration', () => {
-  it('forces regeneration even with existing results and keeps their download links while running', async () => {
+  it('forces regeneration even with existing results and keeps their view controls while running', async () => {
     state = { ...empty, files: outputFiles };
     render(<PreviewSection work={work} capabilities={local} />);
     const regenerate = await screen.findByRole('button', { name: '重新生成预览' });
@@ -270,7 +272,7 @@ describe('file mapping and forced regeneration', () => {
     expect(postCount).toBe(1);
     const post = fetchMock.mock.calls.find(([url, init]) => url.endsWith('/preview') && init?.method === 'POST')!;
     expect(JSON.parse(post[1].body)).toEqual({ video_asset_id: 9, force: true });
-    expect(screen.getAllByRole('link')).toHaveLength(8);
+    expect(document.querySelectorAll('.preview-view-button')).toHaveLength(8);
     expect((screen.getByRole('button', { name: '重新匹配文件' }) as HTMLButtonElement).disabled).toBe(true);
   });
 
@@ -343,7 +345,7 @@ describe('file mapping and forced regeneration', () => {
     await screen.findByText('重新匹配失败：扫描目录不可用');
     expect(screen.getByText('预览任务已完成')).toBeTruthy();
     expect(screen.getByText('源视频或脚本已变化，现有预览需要重新生成。')).toBeTruthy();
-    expect(screen.getAllByRole('link')).toHaveLength(8);
+    expect(document.querySelectorAll('.preview-view-button')).toHaveLength(8);
     expect((screen.getByRole('button', { name: '重新生成预览' }) as HTMLButtonElement).disabled).toBe(true);
   });
 

@@ -31,7 +31,7 @@ export function SourceVideo({ workId, assetId, supported, onOpenFolder, onTimeSe
   };
   if (!supported) return <div className="video-unavailable">{t('原视频播放仅在素材所在本机可用。')}</div>;
   return <div className="source-video">
-    <video ref={player} key={`${workId}-${assetId}`} controls preload="metadata" playsInline src={`/api/works/${workId}/assets/${assetId}/media`}
+    <video ref={player} key={`${workId}-${assetId}`} controls controlsList="nodownload" preload="metadata" playsInline src={`/api/works/${workId}/assets/${assetId}/media`}
       onError={() => setFailed(true)} onTimeUpdate={event => onTimeSelected?.(event.currentTarget.currentTime)} onSeeked={event => setTime(videoTime(event.currentTarget.currentTime))} />
     {failed && <div className="video-unavailable">{t('浏览器无法播放此视频，可打开所在目录；封面仍可按时间截取。')}{onOpenFolder && <button className="text-action" onClick={onOpenFolder}>{t('打开所在目录')}</button>}</div>}
     <div className="video-time-controls"><label>{t('时间位置')}<input value={time} placeholder="00:00:00.000" onChange={event => setTime(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); seek(); } }} /></label><button className="button small" type="button" onClick={seek}>{t('定位时间')}</button></div>

@@ -50,6 +50,8 @@ it('uses the existing manual-play preview renderer and supports actual GIF and h
   const video = inspector.querySelector('video')!;
   expect(video.getAttribute('src')).toBe('/api/works/7/preview/files/clip-01.webm?inline=1');
   expect(video.controls).toBe(true); expect(video.autoplay).toBe(false);
+  expect(video.getAttribute('controlslist')).toBe('nodownload');
+  expect(inspector.querySelector('a[download]')).toBeNull();
   expect(within(inspector).getByText('640 × 360')).toBeTruthy();
   expect(within(inspector).getByText('D:\\previews\\S070\\clip-01.webm')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: /clip-01.gif/ }));
@@ -78,6 +80,7 @@ it('keeps source playback unavailable on a remote client', async () => {
   page(); await screen.findByLabelText('标题'); fireEvent.click(screen.getByRole('tab', { name: '素材' }));
   const inspector = screen.getByRole('region', { name: '素材详情' });
   expect(inspector.querySelector('video')).toBeNull();
+  expect(inspector.querySelector('a[download]')).toBeNull();
   expect(within(inspector).getByText('原视频播放仅在素材所在本机可用。')).toBeTruthy();
 });
 it('reports actual preview state through the optional stable callback', async () => {

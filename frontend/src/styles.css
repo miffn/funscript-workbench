@@ -226,3 +226,5 @@
   .inventory-work-card.work-card .work-info > .work-link-buttons { column-gap:10px; }
   .inventory-work-card.work-card .work-foot { gap:5px; }
 }
+
+.preview-file-size{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}.inline-preview-tools:empty{display:none}
