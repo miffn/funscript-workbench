@@ -70,8 +70,8 @@ describe('persistent work editing', () => {
     fetchMock.mockResolvedValueOnce(response({ detail: '写入失败' }, 503));
     fireEvent.click(screen.getByRole('button', { name: '标记 Patreon 已发布' }));
     await screen.findByText('发布状态未更新：写入失败');
-    expect(screen.getByText('ES 已发布')).toBeTruthy();
-    expect(screen.getByText('Patreon 待发布')).toBeTruthy();
+    expect(screen.getByLabelText('ES · 已发布')).toBeTruthy();
+    expect(screen.getByLabelText('Patreon · 待发布')).toBeTruthy();
     expect(saved).not.toHaveBeenCalled();
   });
 
@@ -165,11 +165,11 @@ describe('host folder capability', () => {
 describe('cover and historical data', () => {
   it('displays both platform states and supports migrated legacy data', () => {
     const view = render(<PublicationBadges work={{ ...fixture, es_published: false, patreon_published: true }} />);
-    expect(screen.getByText('ES 待发布')).toBeTruthy();
-    expect(screen.getByText('Patreon 已发布')).toBeTruthy();
+    expect(screen.getByLabelText('ES · 待发布')).toBeTruthy();
+    expect(screen.getByLabelText('Patreon · 已发布')).toBeTruthy();
     view.rerender(<PublicationBadges work={{ ...fixture, status: 'published' }} />);
-    expect(screen.getByText('ES 已发布')).toBeTruthy();
-    expect(screen.getByText('Patreon 已发布')).toBeTruthy();
+    expect(screen.getByLabelText('ES · 已发布')).toBeTruthy();
+    expect(screen.getByLabelText('Patreon · 已发布')).toBeTruthy();
   });
   it('keeps a cover placeholder if an image fails to load', () => {
     render(<Cover work={fixture} />);

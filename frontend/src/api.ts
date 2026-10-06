@@ -10,7 +10,13 @@ export interface Tag { id: number; category: TagCategory; name: string; support_
 export interface WorkTags { work_id: number; tags: Tag[]; tags_revision: number }
 export type WorkLinkKind = 'patreon' | 'video' | 'script' | 'es';
 export type WorkLinkValues = Record<WorkLinkKind, string>;
-export interface WorkLinks { work_id: number; links: WorkLinkValues; links_revision: number; es_published_date?: string | null; patreon_published_date?: string | null }
+export interface WorkLinks {
+  work_id: number; links: WorkLinkValues; links_revision: number;
+  es_published?: boolean; patreon_published?: boolean;
+  es_published_date?: string | null; patreon_published_date?: string | null;
+  es_planned_date?: string | null; patreon_planned_date?: string | null;
+  publication_revision?: string;
+}
 export interface TagCatalog { items: Tag[]; categories: string[]; import_report?: Record<string, unknown> | null }
 export interface Work {
   id: number; script_id: string | null; title: string; status: Status; video_type?: string | null; axis_type?: string | null;
@@ -22,6 +28,7 @@ export interface Work {
   links?: WorkLinkValues; links_revision?: number;
   es_published?: boolean; patreon_published?: boolean;
   es_published_date?: string | null; patreon_published_date?: string | null;
+  es_planned_date?: string | null; patreon_planned_date?: string | null;
   duration_seconds?: number | null; duration_minutes?: number | null; duration_status?: string; duration_error?: string | null;
   duration_last_known_seconds?: number | null; duration_last_known_minutes?: number | null;
 }

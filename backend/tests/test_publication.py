@@ -162,7 +162,10 @@ def test_es_link_marks_only_es_published_and_clear_does_not_revert(inventory):
     scanner.scan()
     assert client.get(endpoint).json()['es_published'] is False
     assert client.patch(endpoint + '/links', json={'links': {'patreon': 'https://example.test/patreon'}, 'expected_revision': 2}).status_code == 200
-    assert client.get(endpoint).json()['patreon_published'] is False
+    updated = client.get(endpoint).json()
+    assert updated['patreon_published'] is True
+    assert updated['es_published'] is False
+    assert updated['status'] == 'pending'
 
 
 def test_failed_es_link_update_cannot_mark_publication(inventory):

@@ -35,14 +35,15 @@ it('shows calendar-only dates and leaves missing historical dates unrecorded', (
 
 it('displays both dates in every inventory mode without duplicating the ID heading', async () => {
   render(<App />);
-  await screen.findByLabelText('S069 发布日期');
+  await screen.findByLabelText('Patreon · 待发布 · 2026-09-29');
   for (const mode of ['封面画廊', '紧凑目录', '标签列表']) {
     fireEvent.click(screen.getByRole('button', { name: mode }));
-    const dates = screen.getByLabelText('S069 发布日期');
-    expect(within(dates).getByText('Patreon 发布')).toBeTruthy();
-    expect(within(dates).getByText('ES 发布')).toBeTruthy();
-    expect(within(dates).getByText('2026-09-29')).toBeTruthy();
-    expect(within(dates).getByText('未记录')).toBeTruthy();
+    const patreon = screen.getByLabelText('Patreon · 待发布 · 2026-09-29');
+    expect(within(patreon).getByText('09/29').getAttribute('datetime')).toBe('2026-09-29');
+    const es = screen.getByLabelText('ES · 待发布');
+    expect(es.textContent).toBe('ES');
+    expect(es.querySelector('time')).toBeNull();
+    expect(screen.queryByLabelText('S069 发布日期')).toBeNull();
     expect(screen.queryByRole('heading', { name: 'S069' })).toBeNull();
   }
 });
@@ -57,7 +58,9 @@ it('persists edited dates and allows clearing one without affecting the other', 
   fireEvent.change(patreon, { target: { value: '' } });
   patchWork = { ...work, es_published_date: '2026-09-30', patreon_published_date: null };
   fireEvent.click(screen.getByRole('button', { name: '保存信息' }));
-  await screen.findByText('2026-09-30');
+  await screen.findByLabelText('ES · 待发布 · 2026-09-30');
+  expect(screen.getByLabelText('ES · 待发布 · 2026-09-30').querySelector('time')?.getAttribute('datetime')).toBe('2026-09-30');
+  expect(screen.getByLabelText('Patreon · 待发布').querySelector('time')).toBeNull();
   expect(JSON.parse(fetchMock.mock.calls.find(([, init]) => init?.method === 'PATCH')![1].body)).toEqual({ title: 'S069', notes: '', es_published_date: '2026-09-30', patreon_published_date: null });
   expect(saved).toHaveBeenCalledOnce();
   expect((screen.getByRole('button', { name: '保存信息' }) as HTMLButtonElement).disabled).toBe(true);

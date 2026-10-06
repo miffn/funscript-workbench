@@ -10,7 +10,7 @@ let profile = { name: 'User', bio: '', avatar: avatar as string | null, revision
 let icon: HTMLLinkElement;
 
 beforeEach(() => {
-  window.location.hash = '#/settings'; setLanguage({ language: 'zh-CN', revision: 0 });
+  window.history.replaceState(null, '', '/#/profile'); setLanguage({ language: 'zh-CN', revision: 0 });
   profile = { name: 'User', bio: '', avatar, revision: 1 };
   icon = document.createElement('link'); icon.rel = 'icon'; icon.href = '/favicon.svg'; document.head.append(icon);
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
@@ -31,7 +31,7 @@ it('uses the persisted avatar on page load, resets after saving removal and rest
   const view = render(<App />);
   await waitFor(() => expect(icon.getAttribute('href')).toBe(avatar));
   expect(icon.type).toBe('image/png');
-  fireEvent.click(screen.getByText('工作台资料', { selector: 'h2' }));
+  fireEvent.click(screen.getByRole('button', { name: '编辑资料' }));
   fireEvent.click(screen.getByRole('button', { name: '移除头像' }));
   expect(icon.getAttribute('href')).toBe(avatar); // Unsaved draft does not change the tab icon.
   fireEvent.click(screen.getByRole('button', { name: '保存工作台资料' }));
@@ -56,7 +56,7 @@ it('keeps the saved icon when a profile save fails', async () => {
     return response({ items: [] });
   });
   render(<App />); await waitFor(() => expect(icon.getAttribute('href')).toBe(avatar));
-  fireEvent.click(screen.getByText('工作台资料', { selector: 'h2' }));
+  fireEvent.click(screen.getByRole('button', { name: '编辑资料' }));
   fireEvent.click(screen.getByRole('button', { name: '移除头像' }));
   fireEvent.click(screen.getByRole('button', { name: '保存工作台资料' }));
   await screen.findByText('Save failed');

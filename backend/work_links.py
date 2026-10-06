@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ipaddress
+import hashlib
 import json
 import re
 import unicodedata
@@ -17,6 +18,7 @@ LINK_FIELDS = {
     'script': ('script_url', 'script_link', 'download_url', 'Script Link', 'Script URL', 'Script Download URL', '脚本链接'),
     'es': ('es_url', *HISTORY_FIELDS['es_url']),
 }
+PUBLICATION_FIELDS = ('es_published', 'patreon_published', 'es_planned_date', 'patreon_planned_date')
 
 
 class WorkLinksError(ValueError):
@@ -61,7 +63,7 @@ class WorkLinks:
         self.store = store
 
     def state(self, db, work_id: int) -> dict:
-        work = db.execute('SELECT metadata,es_published_date,patreon_published_date FROM works WHERE id=?', (work_id,)).fetchone()
+        work = db.execute('SELECT metadata,es_published,patreon_published,es_published_date,patreon_published_date FROM works WHERE id=?', (work_id,)).fetchone()
         if work is None:
             raise WorkLinksError('库存编号不存在', 404)
         metadata = json.loads(work['metadata'])
@@ -77,17 +79,30 @@ class WorkLinks:
                 except WorkLinksError:
                     # Historical notes or malformed cells are not executable links.
                     links[kind] = ''
-        return {'work_id': work_id, 'links': links, 'links_revision': row['revision'] if row else 0,
-                **{field: work[field] for field in RELEASE_DATE_FIELDS}}
+        # WorkLinks also serves non-HTTP tools; the calendar table is initialized by
+        # the application, but may not exist in a standalone service's store yet.
+        plan_table = db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='release_calendar_plans'").fetchone()
+        plan = db.execute('SELECT * FROM release_calendar_plans WHERE work_id=?', (work_id,)).fetchone() if plan_table else None
+        result = {'work_id': work_id, 'links': links, 'links_revision': row['revision'] if row else 0,
+                  **{field: work[field] for field in RELEASE_DATE_FIELDS},
+                  **{f'{kind}_published': bool(work[f'{kind}_published']) for kind in ('es', 'patreon')},
+                  **{f'{kind}_planned_date': plan[f'{kind}_planned_date'] if plan else None for kind in ('es', 'patreon')}}
+        fingerprint = {field: result[field] for field in (*RELEASE_DATE_FIELDS, *PUBLICATION_FIELDS)}
+        fingerprint.update(links=links, links_revision=result['links_revision'], calendar_revision=plan['revision'] if plan else 0)
+        result['publication_revision'] = hashlib.sha256(json.dumps(fingerprint, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+        return result
 
     def update(self, work_id: int, changes: dict[str, str], expected_revision: int,
-               dates: dict[str, str | None] | None = None) -> dict:
+               dates: dict[str, str | None] | None = None,
+               publication: dict | None = None, expected_publication_revision: str | None = None) -> dict:
         dates = dates or {}
-        if (not changes and not dates) or set(changes) - LINK_FIELDS.keys() or set(dates) - set(RELEASE_DATE_FIELDS):
+        publication = publication or {}
+        if (not changes and not dates and not publication) or set(changes) - LINK_FIELDS.keys() or set(dates) - set(RELEASE_DATE_FIELDS) or set(publication) - set(PUBLICATION_FIELDS):
             raise WorkLinksError('请选择至少一种有效的链接类型')
         changes = {kind: validate_link(value) for kind, value in changes.items()}
         try:
             dates = {field: validate_release_date(value) for field, value in dates.items()}
+            publication = {field: validate_release_date(value) if field.endswith('_date') else value for field, value in publication.items()}
         except ValueError as error:
             raise WorkLinksError(str(error)) from error
         with self.store.connection() as db:
@@ -95,11 +110,22 @@ class WorkLinks:
             current = self.state(db, work_id)
             if current['links_revision'] != expected_revision:
                 raise WorkLinksError('链接已被其他操作更新，请刷新后重试', 409)
+            if publication and not expected_publication_revision:
+                raise WorkLinksError('编辑平台状态或计划日期需要当前发布版本')
+            if expected_publication_revision is not None and current['publication_revision'] != expected_publication_revision:
+                raise WorkLinksError('发布信息已被其他操作更新，请刷新后重试', 409)
             for kind in ('es', 'patreon'):
                 field = f'{kind}_published_date'
+                # New platform links publish that platform. Explicit date edits
+                # win; replacing an already published URL preserves its date.
+                changed_link = changes.get(kind) and changes[kind] != current['links'][kind]
+                if changed_link:
+                    publication[f'{kind}_published'] = True
                 if (field not in dates and changes.get(kind) and changes[kind] != current['links'][kind]
-                        and current[field] is None):
+                        and not current[f'{kind}_published']):
                     dates[field] = release_today()
+                if publication.get(f'{kind}_published') and not current[f'{kind}_published'] and field not in dates:
+                    dates[field] = current[field] or release_today()
             row = db.execute('SELECT overrides FROM work_links WHERE work_id=?', (work_id,)).fetchone()
             overrides = json.loads(row['overrides']) if row else {}
             overrides.update(changes)
@@ -112,9 +138,16 @@ class WorkLinks:
                 assignments = ','.join(f'{field}=?' for field in dates)
                 db.execute(f'UPDATE works SET {assignments},manual_fields=? WHERE id=?',
                            [*dates.values(), json.dumps(sorted(manual)), work_id])
-            if changes.get('es') and changes['es'] != current['links']['es']:
+            states = {field: value for field, value in publication.items() if field.endswith('_published')}
+            if states:
                 work = db.execute('SELECT manual_fields FROM works WHERE id=?', (work_id,)).fetchone()
-                manual = set(json.loads(work['manual_fields'])) | {'es_published'}
-                db.execute("UPDATE works SET es_published=1,status=CASE WHEN patreon_published=1 THEN 'published' ELSE 'pending' END,manual_fields=? WHERE id=?",
-                           (json.dumps(sorted(manual)), work_id))
+                manual = set(json.loads(work['manual_fields'])) | states.keys()
+                assignments = ','.join(f'{field}=?' for field in states)
+                db.execute(f'UPDATE works SET {assignments},manual_fields=? WHERE id=?', [*states.values(), json.dumps(sorted(manual)), work_id])
+                db.execute("UPDATE works SET status=CASE WHEN es_published=1 AND patreon_published=1 THEN 'published' ELSE 'pending' END WHERE id=?", (work_id,))
+            plans = {field: value for field, value in publication.items() if field.endswith('_planned_date')}
+            if plans:
+                db.execute('INSERT INTO release_calendar_plans(work_id,revision) VALUES(?,1) ON CONFLICT(work_id) DO UPDATE SET revision=revision+1', (work_id,))
+                assignments = ','.join(f'{field}=?' for field in plans)
+                db.execute(f'UPDATE release_calendar_plans SET {assignments} WHERE work_id=?', [*plans.values(), work_id])
             return self.state(db, work_id)

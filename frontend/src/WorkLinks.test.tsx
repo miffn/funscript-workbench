@@ -38,7 +38,7 @@ describe('inventory link editing', () => {
     expect(writeText).toHaveBeenCalledWith(current.links.patreon);
     expect((input as HTMLInputElement).value).toBe('https://example.com/unsaved');
     expect(callbacks.onSaved).not.toHaveBeenCalled();
-    expect(screen.queryByRole('button', { name: '复制已保存的视频链接' })).toBeNull();
+    expect((screen.getByRole('button', { name: '复制已保存的视频链接' }) as HTMLButtonElement).disabled).toBe(true);
   });
   it.each([true, false])('uses the modal-safe HTTP fallback and reports its actual result (%s)', async copied => {
     vi.stubGlobal('navigator', { clipboard: { writeText: vi.fn().mockRejectedValue(new Error('denied')) } });

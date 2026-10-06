@@ -53,7 +53,9 @@ FastAPI 服务由 `backend.main:app` 提供，SQLite 及封面保存在项目 `d
 
 作者支持地址状态为 `unknown`、`none` 或 `url`，仅 `url` 状态允许非空且有效的 http(s) 地址，禁止 URL 用户名密码。其他类别不保存支持地址。作者地址属于共享词典，修改一次即供全部绑定作品复用。
 
-库存列表和详情增加 `tags`、`tags_revision`，视频类型优先读取当前分类。人工移除视频类型后不会回退旧快照，原历史 metadata 保留。`GET /api/works` 支持 `tag_id`、`untagged_only=true|false`，搜索可匹配标签名称；无标签筛选不计自动轴字段。
+库存列表和详情增加 `tags`、`tags_revision`，视频类型优先读取当前分类。人工移除视频类型后不会回退旧快照，原历史 metadata 保留。`GET /api/works` 支持 `tag_id`、逗号分隔的 `tag_ids`、`untagged_only=true|false`，搜索可匹配标签名称；组合标签同类别 OR、跨类别 AND，无标签筛选不计自动轴字段。默认 `sort_platform=es&sort_direction=desc` 按 ES 实际发布日期降序排列；可切换 `patreon` 和 `asc`，空日期始终置后，排序先于分页。
+
+发布快编的 `GET/PATCH /api/works/{id}/links` 包含平台状态、实际日期、独立计划日期与四个链接。链接写入保留 `expected_revision`；修改状态、日期或计划还需 `expected_publication_revision`，所有修改在一个事务内完成。新增或更改非空 ES / Patreon 帖子链接时，未发布的平台自动记已发布与北京时间当天；已发布平台保留原日期，包括人工清空的日期。移除链接不撤回发布，视频／脚本链接不改变平台状态。
 
 ## Explicit historical tag import
 

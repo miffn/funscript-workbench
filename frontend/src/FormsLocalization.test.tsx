@@ -23,7 +23,7 @@ describe('localized forms', () => {
     expect((screen.getByLabelText('姓名') as HTMLInputElement).value).toBe('我的名字');
   });
 
-  it('translates axis and duration labels while preserving author and custom tag names', () => {
+  it('translates axis labels while preserving user tag names and omitting duration from flat tags', () => {
     setLanguage({ language: 'en', revision: 1 });
     const tags = [
       { id: 1, category: 'author', name: '单轴' },
@@ -32,9 +32,10 @@ describe('localized forms', () => {
       { id: 4, category: 'custom', name: '我的分类' },
     ] as Tag[];
     render(<TagChips tags={tags} />);
-    expect(screen.getByText('Author')).toBeTruthy();
+    expect(screen.queryByText('Author')).toBeNull();
     expect(screen.getByText('Multi-axis')).toBeTruthy();
-    expect(screen.getByText('12 min')).toBeTruthy();
+    expect(screen.queryByText('12 min')).toBeNull();
+    expect(screen.queryByText('12 分钟')).toBeNull();
     expect(screen.getByText('单轴')).toBeTruthy();
     expect(screen.getByText('我的分类')).toBeTruthy();
     expect(tags[1].name).toBe('多轴');

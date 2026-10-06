@@ -1,0 +1,94 @@
+/* Detail, real background jobs and settings share the workbench tokens. */
+.cover { position: relative; }
+.cover .cover-duration { position:absolute; right:10px; bottom:10px; color:#fff; background:#12151ccc; border-radius:7px; padding:2px 7px; font-size:12px; font-weight:550; line-height:1.7; font-variant-numeric:tabular-nums; }
+.publication-badges { justify-content:flex-start; }
+.publication-badges .badge { gap:0; padding:3px 7px; border-radius:6px; font-weight:550; font-variant-numeric:tabular-nums; }
+.detail-page .detail-body { padding:20px; background:var(--bg); }
+.detail-dialog .detail-body { background:var(--bg); padding:20px; }
+.work-detail-hero { display:grid; grid-template-columns:minmax(250px,380px) minmax(0,1fr); gap:22px; align-items:center; margin-bottom:18px; }
+.work-detail-hero .cover-large { aspect-ratio:16/9; min-height:0; height:auto; margin:0; border-radius:14px; width:100%; }
+.work-detail-hero .detail-heading { display:grid; gap:12px; margin:0; }
+.work-detail-hero .detail-heading h3 { font-size:22px; line-height:1.35; letter-spacing:-.4px; }
+.work-detail-hero .detail-summary { margin-top:13px; padding:0; border:0; display:flex; flex-wrap:wrap; gap:12px; }
+.detail-section-nav { display:flex; gap:4px; flex-wrap:wrap; background:var(--sidebar); border:1px solid var(--line); border-radius:11px; padding:4px; margin-bottom:18px; }
+.detail-section-nav button { background:transparent; border:0; border-radius:8px; color:var(--muted); padding:8px 15px; min-height:40px; font-size:13px; }
+.detail-section-nav button:hover { background:var(--surface); color:var(--text); }
+.detail-body .detail-section, .detail-body .preview-section { background:var(--surface); border:1px solid var(--line); border-radius:13px; padding:18px; margin:0 0 14px; }
+.detail-body .section-heading { margin-bottom:13px; }
+.detail-body .section-heading h3 { font-size:15px; }
+.detail-body .detail-section, .detail-source-assets, .detail-body .edit-form { scroll-margin-top:18px; }
+.detail-body .directory-options { display:block; margin:0; }
+.detail-body .directory-path-link { display:flex; align-items:center; gap:9px; background:transparent; border:0; padding:4px 0; min-height:40px; color:var(--primary); font-size:13px; text-align:left; overflow-wrap:anywhere; max-width:100%; }
+.directory-path-link code { white-space:normal; word-break:break-word; }
+.directory-path-link:hover:not(:disabled) { text-decoration:underline; text-underline-offset:3px; }
+.directory-path-link:disabled { color:var(--muted); opacity:1; }
+.detail-publication .work-state-platforms { margin:0 0 14px; }
+.detail-publication .publication-status-toggle.published { background:var(--good-bg); color:var(--good); border-color:transparent; }
+.detail-publication .publication-status-toggle.pending { background:var(--warm-bg); color:var(--warm); border-color:transparent; }
+.detail-publication .work-link-buttons { gap:8px; }
+.detail-publication .work-link-button { flex-direction:row; gap:6px; min-height:38px; padding:5px 10px; }
+.detail-body .asset-group ul { margin:0; }
+.detail-body .asset-group li { padding:10px 0; }
+.detail-body .edit-form input, .detail-body .edit-form textarea { background:var(--bg); border-radius:8px; }
+.detail-body .detail-tabs { margin-top:4px; }
+.detail-dialog .detail-actions, .detail-page .detail-actions { background:var(--surface); }
+.jobs-toolbar { display:flex; gap:12px; align-items:center; margin-bottom:14px; }
+.jobs-toolbar .search-field { flex:1; width:auto; }
+.job-type-filter { display:flex; align-items:center; gap:7px; background:var(--surface); border:1px solid var(--line); border-radius:9px; padding:0 10px; }
+.job-type-filter select { border:0; background:transparent; color:var(--text); padding:9px 0; min-height:44px; max-width:180px; }
+.jobs-status-filter { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:16px; }
+.jobs-status-filter button { border:1px solid transparent; border-radius:8px; background:transparent; color:var(--muted); padding:7px 12px; min-height:38px; display:flex; gap:8px; align-items:center; }
+.jobs-status-filter button.selected { background:var(--surface); color:var(--text); border-color:var(--line); }
+.jobs-status-filter button span { color:var(--muted); font-size:12px; font-variant-numeric:tabular-nums; }
+.compact-job-list { gap:8px; }
+.compact-job-list .compact-job { padding:0; border:1px solid var(--line); border-radius:12px; overflow:hidden; }
+.job-summary { width:100%; display:flex; gap:12px; align-items:center; text-align:left; background:var(--surface); border:0; padding:13px 15px; min-height:76px; }
+.job-summary:hover { background:var(--bg); }
+.job-summary .job-icon { width:35px; height:35px; flex-shrink:0; }
+.job-summary-name { flex:1; min-width:0; display:grid; gap:4px; }
+.job-summary-name strong { font-size:13px; line-height:1.4; }
+.job-summary-name small { color:var(--muted); font-size:12px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+.job-summary .job-work-name { font-weight:400; }
+.job-expand-chevron { color:var(--muted); transition:transform 200ms ease; }
+.expanded .job-expand-chevron { transform:rotate(180deg); }
+.job-expanded-content { padding:0 18px 18px 62px; background:var(--surface); }
+.job-facts { display:flex; flex-wrap:wrap; gap:10px 26px; margin:0 0 12px; }
+.job-facts div { display:grid; gap:2px; }
+.job-facts dt { color:var(--muted); font-size:11px; }
+.job-facts dd { margin:0; font-size:12px; font-variant-numeric:tabular-nums; }
+.job-expanded-content .job-results { border:1px solid var(--line); padding:10px 12px; background:var(--bg); border-radius:8px; gap:12px; }
+.job-expanded-content .job-results strong { white-space:pre-wrap; overflow-wrap:anywhere; font-size:12px; }
+.job-inputs { margin-top:12px; color:var(--muted); font-size:12px; }
+.job-inputs summary { cursor:pointer; min-height:32px; padding:5px 0; }
+.job-inputs pre { max-width:100%; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; background:var(--bg); border:1px solid var(--line); padding:12px; border-radius:8px; }
+.job-progress { display:block; width:84px; height:4px; background:var(--line); border-radius:4px; overflow:hidden; }
+.job-progress > span { display:block; height:100%; background:var(--primary); border-radius:4px; transition:width 250ms ease; }
+.jobs-pagination { display:flex; align-items:center; justify-content:center; gap:16px; margin-top:16px; color:var(--muted); font-size:12px; }
+.settings-layout .settings-card { padding:20px; border-radius:13px; }
+@media(max-width:760px) {
+  .work-detail-hero { grid-template-columns:minmax(0,1fr); gap:14px; }
+  .work-detail-hero .cover-large { max-height:260px; }
+  .work-detail-hero .detail-heading h3 { font-size:19px; }
+  .detail-page .detail-body, .detail-dialog .detail-body { padding:13px; }
+  .detail-body .detail-section, .detail-body .preview-section { padding:14px; }
+  .detail-section-nav { flex-wrap:nowrap; overflow:auto; }
+  .detail-section-nav button { white-space:nowrap; padding:7px 10px; }
+  .jobs-toolbar { flex-wrap:wrap; gap:8px; }
+  .jobs-toolbar .search-field { flex-basis:100%; }
+  .job-summary { gap:8px; padding:12px 10px; flex-wrap:wrap; }
+  .job-summary-name { flex-basis:calc(100% - 48px); }
+  .job-summary > .badge { margin-left:43px; }
+  .job-summary .job-progress { margin-left:auto; }
+  .job-summary > .job-expand-chevron { margin-left:auto; }
+  .job-expanded-content { padding:0 14px 14px; }
+}
+@media(prefers-reduced-motion:reduce) { .job-expand-chevron, .job-progress > span { transition:none; } }
+.detail-page > .detail-body.detail-body { padding:20px; }
+.detail-page .work-detail-hero .cover-large { width:100%; margin:0; }
+.detail-publication .release-date-fields { margin:0 0 9px; max-width:540px; }
+.detail-publication .release-date-fields label { display:block; margin-bottom:5px; color:var(--muted); font-size:12px; }
+.detail-publication .release-date-fields input { width:100%; min-height:40px; border:1px solid var(--line); border-radius:8px; padding:7px 10px; color:var(--text); background:var(--bg); }
+.detail-publication .help-text { margin:9px 0; }
+.detail-planned-dates { display:flex; flex-wrap:wrap; gap:8px 16px; color:var(--warm); font-size:12px; margin:8px 0 12px; }
+.job-expanded-content .job-results > span { max-width:100%; }
+@media(max-width:760px) { .detail-page > .detail-body.detail-body { padding:13px; } }

@@ -4,12 +4,13 @@ import { workflows } from './i18n/workflows';
 import { posts } from './i18n/posts';
 import { server } from './i18n/server';
 import { core } from './i18n/core';
+import { design } from './i18n/design';
 
 export type Language = 'zh-CN' | 'en';
 export interface LanguageState { language: Language; revision: number }
 let state: LanguageState = { language: 'zh-CN', revision: 0 };
 const listeners = new Set<() => void>();
-const catalog: Record<string, string> = { ...server, ...posts, ...workflows, ...forms, ...core };
+const catalog: Record<string, string> = { ...server, ...posts, ...workflows, ...forms, ...core, ...design };
 const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 function patternFor(key: string, value: string) {
   const names: string[] = [];

@@ -21,7 +21,7 @@ from .store import Store, now
 from .tags import TagService, TagError
 from .durations import duration_fields
 from .scan_roots import ScanRoots, ScanRootsError
-from .work_links import WorkLinks, WorkLinksError
+from .work_links import WorkLinks, WorkLinksError, PUBLICATION_FIELDS
 from .release_dates import RELEASE_DATE_FIELDS, validate_release_date, release_today
 from .profile import register_profile_routes
 from .language import register_language_routes
@@ -148,11 +148,18 @@ class WorkLinksEdit(BaseModel):
     expected_revision: int = Field(strict=True, ge=0)
     es_published_date: ReleaseDate = None
     patreon_published_date: ReleaseDate = None
+    es_published: bool | None = Field(default=None, strict=True)
+    patreon_published: bool | None = Field(default=None, strict=True)
+    es_planned_date: ReleaseDate = None
+    patreon_planned_date: ReleaseDate = None
+    expected_publication_revision: str | None = Field(default=None, strict=True, pattern=r'^[a-f0-9]{64}$')
 
     @model_validator(mode='after')
     def has_changes(self):
-        if not self.links and not self.model_fields_set.intersection(RELEASE_DATE_FIELDS):
+        if not self.links and not self.model_fields_set.intersection((*RELEASE_DATE_FIELDS, *PUBLICATION_FIELDS)):
             raise ValueError('请至少填写一种链接或发布日期')
+        if any(getattr(self, field) is None for field in ('es_published', 'patreon_published') if field in self.model_fields_set):
+            raise ValueError('平台发布状态不能为 null')
         return self
 
 
@@ -217,6 +224,7 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
         link_state = links.state(db, record["id"])
         record["links"] = link_state["links"]
         record["links_revision"] = link_state["links_revision"]
+        record.update({field: link_state[field] for field in ('es_planned_date', 'patreon_planned_date', 'publication_revision')})
         tag_state = tags.work_state(db, record["id"])
         record["tags"] = tag_state["tags"]
         record["tags_revision"] = tag_state["tags_revision"]
@@ -331,6 +339,8 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
     @app.get("/api/works")
     def works(q: str = Query(default="", max_length=300), status: str = "all", issues_only: bool = False,
               tag_id: int | None = Query(default=None, gt=0), untagged_only: str = Query(default="false", pattern="^(true|false)$"),
+              tag_ids: str = Query(default="", max_length=1200),
+              sort_platform: Literal['es', 'patreon'] = 'es', sort_direction: Literal['asc', 'desc'] = 'desc',
               page: int = Query(default=1, ge=1), page_size: int = Query(default=24, ge=1, le=100)):
         status_filters = {'pending': '(es_published=0 OR patreon_published=0)',
                           'published': '(es_published=1 AND patreon_published=1)',
@@ -338,6 +348,14 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
         if status != 'all' and status != 'to_make' and status not in status_filters:
             raise HTTPException(422, "库存分类应为 to_make、pending、published、es_published、patreon_published 或 all")
         clauses, values = [], []
+        selected_tags = set()
+        if tag_ids:
+            parts = tag_ids.split(',')
+            if len(parts) > 100 or any(not part.isdecimal() or int(part) <= 0 for part in parts):
+                raise HTTPException(422, '筛选标签应为最多 100 个正整数 ID，以逗号分隔')
+            selected_tags.update(int(part) for part in parts)
+        if tag_id is not None:
+            selected_tags.add(tag_id)
         if q.strip():
             # Literal search: % and _ in user text are not wildcard operators.
             term = q.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
@@ -347,16 +365,22 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
             clauses.append(status_filters[status])
         if issues_only:
             clauses.append("EXISTS(SELECT 1 FROM issues WHERE issues.work_id=works.id)")
-        if tag_id is not None:
-            clauses.append("EXISTS(SELECT 1 FROM work_tags WHERE work_tags.work_id=works.id AND work_tags.tag_id=?)")
-            values.append(tag_id)
         if untagged_only == "true":
-            if tag_id is not None:
+            if selected_tags:
                 raise HTTPException(422, "按标签筛选不能同时只看无标签库存")
             clauses.append("NOT EXISTS(SELECT 1 FROM work_tags wt JOIN tags t ON t.id=wt.tag_id WHERE wt.work_id=works.id AND t.category!='duration' AND (t.category!='axis_type' OR wt.source!='scan'))")
         with store.connection() as db:
-            if tag_id is not None and not db.execute("SELECT 1 FROM tags WHERE id=?", (tag_id,)).fetchone():
-                raise HTTPException(404, "筛选标签不存在")
+            if selected_tags:
+                selected = sorted(selected_tags)
+                catalog = db.execute(f"SELECT id,category FROM tags WHERE id IN ({','.join('?' for _ in selected)})", selected).fetchall()
+                if len(catalog) != len(selected):
+                    raise HTTPException(404, '筛选标签不存在')
+                categories = {}
+                for tag in catalog:
+                    categories.setdefault(tag['category'], []).append(tag['id'])
+                for ids in categories.values():
+                    clauses.append(f"EXISTS(SELECT 1 FROM work_tags WHERE work_tags.work_id=works.id AND work_tags.tag_id IN ({','.join('?' for _ in ids)}))")
+                    values.extend(ids)
             ready_ids, to_make_ids = script_groups(db)
             if status in {'pending', 'to_make'}:
                 ids = sorted(ready_ids if status == 'pending' else to_make_ids)
@@ -364,7 +388,9 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
                 values.extend(ids)
             where = " WHERE " + " AND ".join(clauses) if clauses else ""
             total = db.execute("SELECT count(*) FROM works" + where, values).fetchone()[0]
-            rows = db.execute("SELECT * FROM works" + where + " ORDER BY script_id DESC,id DESC LIMIT ? OFFSET ?", [*values, page_size, (page - 1) * page_size]).fetchall()
+            date_field = f'{sort_platform}_published_date'
+            order = f' ORDER BY ({date_field} IS NULL OR {date_field}=\'\') ASC,{date_field} {sort_direction.upper()},script_id DESC,id DESC LIMIT ? OFFSET ?'
+            rows = db.execute("SELECT * FROM works" + where + order, [*values, page_size, (page - 1) * page_size]).fetchall()
             stats = {"total": db.execute("SELECT count(*) FROM works").fetchone()[0],
                      "pending": sum(row['id'] in ready_ids for row in db.execute("SELECT id FROM works WHERE es_published=0 OR patreon_published=0")),
                      "to_make": len(to_make_ids),
@@ -445,7 +471,8 @@ def create_app(config: Config | None = None, start_worker: bool = True) -> FastA
     def update_work_links(work_id: int, options: WorkLinksEdit):
         try:
             dates = {field: getattr(options, field) for field in RELEASE_DATE_FIELDS if field in options.model_fields_set}
-            return links.update(work_id, options.links, options.expected_revision, dates)
+            publication = {field: getattr(options, field) for field in PUBLICATION_FIELDS if field in options.model_fields_set}
+            return links.update(work_id, options.links, options.expected_revision, dates, publication, options.expected_publication_revision)
         except WorkLinksError as error:
             raise HTTPException(error.status_code, str(error))
 

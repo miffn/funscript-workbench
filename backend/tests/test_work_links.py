@@ -39,9 +39,12 @@ def test_history_initial_values_exposed_in_detail_and_list(inventory):
     work_id = ids['S064']
     with TestClient(app) as client:
         state = client.get(f'/api/works/{work_id}/links').json()
-        assert state == {'work_id': work_id, 'links_revision': 0, 'links': {
+        assert {key: state[key] for key in ('work_id', 'links_revision', 'links', 'es_published_date', 'patreon_published_date')} == {'work_id': work_id, 'links_revision': 0, 'links': {
             kind: f'https://example.test/{kind}' for kind in ('patreon', 'video', 'script', 'es')},
             'es_published_date': None, 'patreon_published_date': None}
+        assert state['es_published'] is state['patreon_published'] is True
+        assert state['es_planned_date'] is state['patreon_planned_date'] is None
+        assert len(state['publication_revision']) == 64
         detail = client.get(f'/api/works/{work_id}').json()
         listed = next(row for row in client.get('/api/works').json()['items'] if row['id'] == work_id)
         for result in (detail, listed):

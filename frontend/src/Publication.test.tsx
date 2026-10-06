@@ -31,21 +31,32 @@ it('filters independently by ES and Patreon and displays independent counts', as
 
 it('shows both status badges in gallery, list and the quick tag view', async () => {
   render(<App />);
-  await screen.findByText('ES 已发布', { selector: '.badge' });
-  expect(screen.getByText('Patreon 待发布', { selector: '.badge' })).toBeTruthy();
+  await screen.findByLabelText('ES · 已发布');
+  const assertPlatformStates = () => {
+    const es = screen.getByLabelText('ES · 已发布');
+    const patreon = screen.getByLabelText('Patreon · 待发布');
+    expect(es.classList.contains('published')).toBe(true);
+    expect(es.classList.contains('pending')).toBe(false);
+    expect(patreon.classList.contains('pending')).toBe(true);
+    expect(patreon.classList.contains('published')).toBe(false);
+    expect(es.textContent).toBe('ES');
+    expect(patreon.textContent).toBe('Patreon');
+    for (const label of ['Patreon 文章链接', '视频链接', '脚本链接', 'ES 帖子链接']) {
+      expect(screen.getByRole('button', { name: `填写 ${label} S064` }).classList.contains('empty')).toBe(true);
+    }
+  };
+  assertPlatformStates();
   fireEvent.click(screen.getByRole('button', { name: '紧凑目录' }));
-  expect(screen.getByText('ES 已发布', { selector: '.badge' })).toBeTruthy();
-  expect(screen.getByText('Patreon 待发布', { selector: '.badge' })).toBeTruthy();
+  assertPlatformStates();
   fireEvent.click(screen.getByRole('button', { name: '标签列表' }));
-  expect(screen.getByText('ES 已发布', { selector: '.badge' })).toBeTruthy();
-  expect(screen.getByText('Patreon 待发布', { selector: '.badge' })).toBeTruthy();
+  assertPlatformStates();
   expect(screen.queryByRole('img')).toBeNull();
 });
 
 it('opens a saved platform route directly', async () => {
   window.location.hash = '#/patreon_published';
   render(<App />);
-  await screen.findByText('Patreon 待发布', { selector: '.badge' });
+  expect((await screen.findByLabelText('Patreon · 待发布')).classList.contains('pending')).toBe(true);
   expect(fetchMock.mock.calls.some(([url]) => url.includes('status=patreon_published'))).toBe(true);
   expect(screen.getByRole('heading', { name: 'Patreon 已发布作品' })).toBeTruthy();
 });

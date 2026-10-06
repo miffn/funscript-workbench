@@ -112,7 +112,8 @@ def test_record_es_link_preserves_other_links_and_assigns_date(bridge):
     assert result['links']['patreon'] == before['links']['patreon']
     assert result['es_published_date']
     after = client.inspect('S025_001')['work']
-    assert after['es_published'] is True and after['patreon_published'] is False
+    assert after['es_published'] is True
+    assert after['patreon_published'] == before['patreon_published']
 
 
 def test_conflict_and_redirect_never_retry_mutation(bridge):

@@ -1,19 +1,20 @@
 import { workIdentity } from './api';
-import { translate as t, useI18n, tagName } from './i18n';
-import { LanguageSettings } from './LanguageSettings';
+import { translate as t, useI18n } from './i18n';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Archive, ArrowLeft, ArrowRight, Check, CheckCheck, CalendarDays, ChevronRight, CircleAlert, Clock3, FilePenLine, FileText, Film, LayoutGrid, List, LoaderCircle, Moon, RefreshCw, Search, Settings2, SlidersHorizontal, Sun, Tag as TagIcon, X } from 'lucide-react';
+import { AudioLines, ArrowLeft, ArrowRight, ArrowDownWideNarrow, ArrowUpWideNarrow, Check, CheckCheck, CalendarDays, CircleAlert, Clock3, FilePenLine, FileText, Film, LayoutGrid, List, LoaderCircle, Moon, PanelLeftClose, PanelLeftOpen, RefreshCw, Search, Settings2, SlidersHorizontal, Sun, Tag as TagIcon, X } from 'lucide-react';
 import { errorMessage, formatDate, isActiveJob, request } from './api';
 import type { Capabilities, Filter, Inventory, Job, Work, WorkLinkKind, WorkLinks, WorkTags } from './api';
 import { WorkLinkButtons, WorkLinkEditor } from './WorkLinks';
-import { ReleaseDates, workDisplayTitle } from './ReleaseDates';
-import { ProfileSettings } from './ProfileSettings';
-import { EsTemplateSettings } from './ReleasePosts';
-import { SHOW_ES_POSTS } from './features';
+import { workDisplayTitle } from './ReleaseDates';
+import { PersonalPage } from './PersonalPage';
+import { SettingsWorkbench } from './SettingsWorkbench';
+import { storedChoice, storedFlag, systemIsDark } from './Preferences';
+import type { Theme } from './Preferences';
+import { InventoryFilters, filterSummary } from './InventoryFilters';
 import { ReleaseCalendar } from './ReleaseCalendar';
 import type { ProfileData } from './ProfileSettings';
-import { TagChips, TagsPage, WorkTagEditor, useTagCatalog, tagCategories } from './Tags';
-import { Cover, EmptyState, Loading, WorkDetail, IssuesPage, JobsPage, SettingsPage, PublicationBadges } from './components';
+import { TagChips, TagsPage, WorkTagEditor, useTagCatalog } from './Tags';
+import { Cover, EmptyState, Loading, WorkDetail, IssuesPage, JobsPage, PublicationBadges } from './components';
 import type { WorkDetailHandle } from './components';
 import { initialNavigation, useWorkbenchNavigation } from './useWorkbenchNavigation';
 import type { InventoryPosition, Page } from './useWorkbenchNavigation';
@@ -38,7 +39,11 @@ export default function App() {
   const [selected, setSelected] = useState<number | null>(null);
   const [tagWork, setTagWork] = useState<Work | null>(null);
   const [linkWork, setLinkWork] = useState<{ work: Work; kind: WorkLinkKind } | null>(null);
-  const [tagId, setTagId] = useState<number | null>(initial.inventory?.tagId || null);
+  const [tagIds, setTagIds] = useState<number[]>(initial.inventory?.tagIds || (initial.inventory?.tagId ? [initial.inventory.tagId] : []));
+  const tagId = tagIds.length === 1 ? tagIds[0] : null;
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [sortPlatform, setSortPlatform] = useState<'es' | 'patreon'>(initial.inventory?.sortPlatform || storedChoice<'es' | 'patreon'>('workbench-sort-platform', ['es', 'patreon'], 'es'));
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>(initial.inventory?.sortDirection || storedChoice<'asc' | 'desc'>('workbench-sort-direction', ['asc', 'desc'], 'desc'));
   const [untaggedOnly, setUntaggedOnly] = useState(initial.inventory?.untaggedOnly || false);
   const [capabilities, setCapabilities] = useState<Capabilities>({ can_open_folder: false, reason: t("正在检查访问端能力") });
   const [notice, setNotice] = useState<Notice | null>(null);
@@ -65,21 +70,26 @@ export default function App() {
   }, [profileRetry]);
   const [job, setJob] = useState<Job | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [theme, setTheme] = useState(document.documentElement.dataset.theme || 'light');
+  const [theme, setTheme] = useState<Theme>(() => storedChoice('workbench-theme', ['auto', 'light', 'dark'], 'auto'));
+  const [dark, setDark] = useState(theme === 'dark' || theme === 'auto' && systemIsDark());
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => storedFlag('workbench-sidebar-collapsed'));
+  const [spring, setSpring] = useState(() => storedFlag('workbench-spring', true));
+  const [reduceMotion, setReduceMotion] = useState(() => storedFlag('workbench-reduce-motion'));
   const [view, setView] = useState<'gallery' | 'list' | 'tags'>(() => { if (initial.inventory) return initial.inventory.view; try { const saved = localStorage.getItem('workbench-view'); return saved === 'list' || saved === 'tags' ? saved : 'gallery'; } catch { return 'gallery'; } });
   const { catalog, error: tagError, refresh: refreshTags } = useTagCatalog(revision);
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const detailGuard = useRef<WorkDetailHandle>(null);
   const restorePosition = useRef<InventoryPosition | undefined>(initial.route.page === 'inventory' ? initial.inventory : undefined);
   const loadedInventory = useRef<string | null>(null);
-  const inventoryKey = JSON.stringify([filter, search, number, issuesOnly, tagId, untaggedOnly]);
+  const inventoryKey = JSON.stringify([filter, search, number, issuesOnly, tagIds, untaggedOnly, sortPlatform, sortDirection]);
   const restoreInventory = (saved: InventoryPosition) => {
     setFilter(saved.filter); setQuery(saved.query); setSearch(saved.search); setNumber(saved.number);
-    setIssuesOnly(saved.issuesOnly); setTagId(saved.tagId); setUntaggedOnly(saved.untaggedOnly); setView(saved.view);
+    setIssuesOnly(saved.issuesOnly); setTagIds(saved.tagIds || (saved.tagId ? [saved.tagId] : [])); setUntaggedOnly(saved.untaggedOnly); setView(saved.view);
+    if (saved.sortPlatform) setSortPlatform(saved.sortPlatform); if (saved.sortDirection) setSortDirection(saved.sortDirection);
   };
-  const { navigate, openWork, backToInventory } = useWorkbenchNavigation({
+  const { navigate, openWork, backToInventory, returnPage } = useWorkbenchNavigation({
     detailRef: detailGuard,
-    getInventory: () => ({ filter, query, search, number, issuesOnly, tagId, untaggedOnly, view, scrollY: window.scrollY }),
+    getInventory: () => ({ filter, query, search, number, issuesOnly, tagId, tagIds, untaggedOnly, sortPlatform, sortDirection, view, scrollY: window.scrollY }),
     onRoute: (route, saved) => {
       restorePosition.current = undefined;
       if (route.page === 'inventory' && (page === 'detail' || saved.inventory)) {
@@ -131,7 +141,8 @@ export default function App() {
       inFlight = true;
       controller = new AbortController();
       const params = new URLSearchParams({ q: search, status: filter, issues_only: String(issuesOnly), page: String(number), page_size: String(PAGE_SIZE) });
-      if (tagId !== null) params.set('tag_id', String(tagId));
+      params.set('sort_platform', sortPlatform); params.set('sort_direction', sortDirection);
+      if (tagIds.length) params.set('tag_ids', tagIds.join(','));
       if (untaggedOnly) params.set('untagged_only', 'true');
       try {
         const result = await request<Inventory>(`/api/works?${params}`, { signal: controller.signal });
@@ -142,7 +153,7 @@ export default function App() {
     void load();
     const timer = setInterval(() => void load(), 10000);
     return () => { alive = false; clearInterval(timer); controller?.abort(); };
-  }, [search, filter, issuesOnly, number, revision, tagId, untaggedOnly]);
+  }, [search, filter, issuesOnly, number, revision, tagIds, untaggedOnly, sortPlatform, sortDirection]);
   useEffect(() => {
     let alive = true;
     let controller: AbortController | null = null;
@@ -183,9 +194,18 @@ export default function App() {
     return () => { alive = false; clearInterval(timer); controller?.abort(); };
   }, [job?.id, job?.status, notify]);
   useEffect(() => {
-    try { localStorage.setItem('workbench-view', view); localStorage.setItem('workbench-theme', theme); } catch { /* Optional appearance preferences only. */ }
-    document.documentElement.dataset.theme = theme;
-  }, [theme, view]);
+    try {
+      localStorage.setItem('workbench-view', view); localStorage.setItem('workbench-theme', theme);
+      localStorage.setItem('workbench-sidebar-collapsed', String(sidebarCollapsed));
+      localStorage.setItem('workbench-spring', String(spring)); localStorage.setItem('workbench-reduce-motion', String(reduceMotion));
+      localStorage.setItem('workbench-sort-platform', sortPlatform); localStorage.setItem('workbench-sort-direction', sortDirection);
+    } catch { /* Optional browser preferences only. */ }
+    const applyTheme = () => { const next = theme === 'dark' || theme === 'auto' && systemIsDark(); setDark(next); document.documentElement.dataset.theme = next ? 'dark' : 'light'; };
+    applyTheme(); document.documentElement.dataset.motion = reduceMotion ? 'reduced' : spring ? 'spring' : 'standard';
+    const media = typeof window.matchMedia === 'function' ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+    media?.addEventListener('change', applyTheme);
+    return () => media?.removeEventListener('change', applyTheme);
+  }, [theme, view, sidebarCollapsed, spring, reduceMotion, sortPlatform, sortDirection]);
 
   const stats = inventory?.stats || EMPTY_STATS;
   const currentJob = isActiveJob(job) ? job : null;
@@ -196,63 +216,70 @@ export default function App() {
     catch (error) { notify({ kind: 'error', message: t("无法开始扫描：{0}", {"0": errorMessage(error)}) }); }
     finally { setSubmitting(false); }
   };
-  const title = page === 'inventory' ? filter === 'to_make' ? t('待制作库存') : filter === 'pending' ? t("待发布库存") : filter === 'es_published' ? t("ES 已发布作品") : filter === 'patreon_published' ? t("Patreon 已发布作品") : filter === 'published' ? t("全部平台已发布作品") : t("脚本库存") : page === 'issues' ? t("待处理") : page === 'jobs' ? t("任务记录") : page === 'tags' ? t("标签管理") : page === 'calendar' ? t("发布日历") : t("工作台设置");
-  const subtitle = page === 'inventory' ? filter === 'to_make' ? t('添加脚本并扫描或重新匹配后，还需在作品详情手动确认制作完成；有脚本且尚未全部发布的作品才会进入待发布。') : t("每个作品都有独立的素材与发布进展。") : page === 'issues' ? t("查看编号冲突、缺失素材和历史资料的关联问题。") : page === 'jobs' ? t("库存扫描与预览生成的执行进度、结果和失败原因。") : page === 'tags' ? t("统一维护作者与分类，作品绑定标签后复用资料。") : page === 'calendar' ? t("安排发布计划，记录 ES 与 Patreon 的实际发布日期。") : t("当前扫描目录与工作台的运行规则。");
+  const title = page === 'inventory' ? filter === 'to_make' ? t('待制作库存') : filter === 'pending' ? t("待发布库存") : filter === 'es_published' ? t("ES 已发布作品") : filter === 'patreon_published' ? t("Patreon 已发布作品") : filter === 'published' ? t("全部平台已发布作品") : t("脚本库存") : page === 'issues' ? t("待处理") : page === 'jobs' ? t("任务记录") : page === 'tags' ? t("标签管理") : page === 'calendar' ? t("发布日历") : page === 'profile' ? t('个人中心') : t("工作台设置");
+  const subtitle = page === 'inventory' ? filter === 'to_make' ? t('添加脚本并扫描或重新匹配后，还需在作品详情手动确认制作完成；有脚本且尚未全部发布的作品才会进入待发布。') : t('查找素材，整理标签，继续你的创作。') : page === 'issues' ? t("查看编号冲突、缺失素材和历史资料的关联问题。") : page === 'jobs' ? t("库存扫描与预览生成的执行进度、结果和失败原因。") : page === 'tags' ? t("统一维护作者与分类，作品绑定标签后复用资料。") : page === 'calendar' ? t("安排发布计划，记录 ES 与 Patreon 的实际发布日期。") : page === 'profile' ? t('你的资料与个人工作台。') : t("当前扫描目录与工作台的运行规则。");
   const totalPages = Math.max(1, Math.ceil((inventory?.total || 0) / PAGE_SIZE));
   const tagsSaved = (value: WorkTags) => {
     setInventory(previous => previous ? { ...previous, items: previous.items.map(work => work.id === value.work_id ? { ...work, tags: value.tags, tags_revision: value.tags_revision } : work) } : previous);
     setRevision(value => value + 1); notify({ kind: 'success', message: t("作品标签已保存") });
   };
   const linksSaved = (value: WorkLinks) => {
-    setInventory(previous => previous ? { ...previous, items: previous.items.map(work => work.id === value.work_id ? { ...work, links: value.links, links_revision: value.links_revision, es_published_date: value.es_published_date, patreon_published_date: value.patreon_published_date } : work) } : previous);
+    setInventory(previous => previous ? { ...previous, items: previous.items.map(work => work.id === value.work_id ? { ...work, ...value, id: work.id } : work) } : previous);
     setRevision(revision => revision + 1); notify({ kind: 'success', message: t("发布链接已保存") });
   };
 
-  return <div className="app-shell">
+  const clearFilters = () => { setQuery(''); setSearch(''); setIssuesOnly(false); setTagIds([]); setUntaggedOnly(false); setNumber(1); };
+  const selectedSummary = [filterSummary(catalog, tagIds), issuesOnly ? t('仅看异常') : '', untaggedOnly ? t('仅看未标注') : ''].filter(Boolean).join(' · ');
+  const changeSortPlatform = (value: 'es' | 'patreon') => { setSortPlatform(value); setNumber(1); };
+  const changeSortDirection = (value: 'asc' | 'desc') => { setSortDirection(value); setNumber(1); };
+  return <div className={`app-shell ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
     <a className="skip-link" href="#main-content" onClick={event => { event.preventDefault(); const main = document.getElementById('main-content'); main?.focus({ preventScroll: true }); main?.scrollIntoView({ block: 'start', behavior: 'auto' }); }}>{t("跳到主要内容")}</a>
+    <header className="app-topbar"><a className="app-wordmark" href="#/inventory" onClick={event => { event.preventDefault(); navigate('inventory'); }}><span><AudioLines size={22} aria-hidden="true" /></span>Funscript</a><span className="app-workspace-label">{t('我的工作空间')}</span></header>
     <aside className="sidebar" aria-label={t("工作台导航")}>
-      <a className="brand" href="#/settings" onClick={event => { event.preventDefault(); navigate('settings'); }} aria-label={t("编辑工作台资料")} title={t("修改头像、姓名和简介")}><div className="brand-mark">{profile.avatar ? <img src={profile.avatar} alt={t("{0}的头像", {"0": profile.name})} /> : <Archive size={21} aria-hidden="true" />}</div><div><strong>{profile.name}</strong><small>{profile.bio}</small></div></a>
+      <a className={`brand ${page === 'profile' ? 'active' : ''}`} href="#/profile" onClick={event => { event.preventDefault(); navigate('profile'); }} aria-label={t('个人中心')} title={`${profile.name} · ${t('个人中心')}`} aria-current={page === 'profile' ? 'page' : undefined}><div className="brand-mark">{profile.avatar ? <img src={profile.avatar} alt={t("{0}的头像", {"0": profile.name})} /> : <span>{profile.name.slice(0, 1).toUpperCase()}</span>}</div><div className="brand-text"><strong>{profile.name}</strong><small>{t('个人工作台')}</small></div></a>
       <div className="nav-section"><p className="section-label">{t("作品库")}</p><nav className="nav-list">
-        <button className={(page === 'inventory' || page === 'detail') && filter === 'all' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('inventory')} aria-current={(page === 'inventory' || page === 'detail') && filter === 'all' ? 'page' : undefined}><LayoutGrid size={18} /><span>{t("全部库存")}</span>{inventory && <span className="nav-count">{stats.total}</span>}</button>
-        <button className={(page === 'inventory' || page === 'detail') && filter === 'to_make' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('inventory', 'to_make')} aria-current={(page === 'inventory' || page === 'detail') && filter === 'to_make' ? 'page' : undefined}><FilePenLine size={18} /><span>{t('待制作')}</span>{inventory && <span className="nav-count">{stats.to_make ?? 0}</span>}</button>
-        <button className={(page === 'inventory' || page === 'detail') && filter === 'pending' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('inventory', 'pending')} aria-current={(page === 'inventory' || page === 'detail') && filter === 'pending' ? 'page' : undefined}><Clock3 size={18} /><span>{t("待发布")}</span>{inventory && <span className="nav-count">{stats.pending}</span>}</button>
-        <button className={page === 'calendar' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('calendar')} aria-current={page === 'calendar' ? 'page' : undefined}><CalendarDays size={18} /><span>{t("发布日历")}</span></button>
-        {(['es_published', 'patreon_published'] as const).map(platformFilter => <button key={platformFilter} className={(page === 'inventory' || page === 'detail') && filter === platformFilter ? 'nav-item active' : 'nav-item'} onClick={() => navigate('inventory', platformFilter)} aria-current={(page === 'inventory' || page === 'detail') && filter === platformFilter ? 'page' : undefined}><CheckCheck size={18} /><span>{platformFilter === 'es_published' ? t("ES 已发布") : t("Patreon 已发布")}</span>{inventory && <span className="nav-count">{stats[platformFilter] ?? stats.published}</span>}</button>)}
+        <button title={t("全部库存")} className={(page === 'inventory' || page === 'detail') && filter === 'all' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('inventory')} aria-current={(page === 'inventory' || page === 'detail') && filter === 'all' ? 'page' : undefined}><LayoutGrid size={18} /><span>{t("全部库存")}</span>{inventory && <span className="nav-count">{stats.total}</span>}</button>
+        <button title={t("待制作")} className={(page === 'inventory' || page === 'detail') && filter === 'to_make' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('inventory', 'to_make')} aria-current={(page === 'inventory' || page === 'detail') && filter === 'to_make' ? 'page' : undefined}><FilePenLine size={18} /><span>{t('待制作')}</span>{inventory && <span className="nav-count">{stats.to_make ?? 0}</span>}</button>
+        <button title={t("待发布")} className={(page === 'inventory' || page === 'detail') && filter === 'pending' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('inventory', 'pending')} aria-current={(page === 'inventory' || page === 'detail') && filter === 'pending' ? 'page' : undefined}><Clock3 size={18} /><span>{t("待发布")}</span>{inventory && <span className="nav-count">{stats.pending}</span>}</button>
+        <button title={t("发布日历")} className={page === 'calendar' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('calendar')} aria-current={page === 'calendar' ? 'page' : undefined}><CalendarDays size={18} /><span>{t("发布日历")}</span></button>
+        {(['es_published', 'patreon_published'] as const).map(platformFilter => <button key={platformFilter} title={platformFilter === 'es_published' ? t("ES 已发布") : t("Patreon 已发布")} className={(page === 'inventory' || page === 'detail') && filter === platformFilter ? 'nav-item active' : 'nav-item'} onClick={() => navigate('inventory', platformFilter)} aria-current={(page === 'inventory' || page === 'detail') && filter === platformFilter ? 'page' : undefined}><CheckCheck size={18} /><span>{platformFilter === 'es_published' ? t("ES 已发布") : t("Patreon 已发布")}</span>{inventory && <span className="nav-count">{stats[platformFilter] ?? stats.published}</span>}</button>)}
       </nav></div>
       <div className="nav-section"><p className="section-label">{t("工作流")}</p><nav className="nav-list">
-        <button className={page === 'issues' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('issues')} aria-current={page === 'issues' ? 'page' : undefined}><CircleAlert size={18} /><span>{t("待处理")}</span>{inventory && stats.issues > 0 && <span className="nav-count issue-count">{stats.issues}</span>}</button>
-        <button className={page === 'jobs' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('jobs')} aria-current={page === 'jobs' ? 'page' : undefined}><RefreshCw size={18} /><span>{t("任务记录")}</span>{currentJob && <span className="activity-dot" aria-label={t("正在扫描")} />}</button>
-        <button className={page === 'tags' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('tags')} aria-current={page === 'tags' ? 'page' : undefined}><TagIcon size={18} /><span>{t("标签管理")}</span></button>
-        <button className={page === 'settings' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('settings')} aria-current={page === 'settings' ? 'page' : undefined}><Settings2 size={18} /><span>{t("设置")}</span></button>
+        <button title={t("待处理")} className={page === 'issues' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('issues')} aria-current={page === 'issues' ? 'page' : undefined}><CircleAlert size={18} /><span>{t("待处理")}</span>{inventory && stats.issues > 0 && <span className="nav-count issue-count">{stats.issues}</span>}</button>
+        <button title={t("任务记录")} className={page === 'jobs' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('jobs')} aria-current={page === 'jobs' ? 'page' : undefined}><RefreshCw size={18} /><span>{t("任务记录")}</span>{currentJob && <span className="activity-dot" aria-label={t("正在扫描")} />}</button>
+        <button title={t("标签管理")} className={page === 'tags' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('tags')} aria-current={page === 'tags' ? 'page' : undefined}><TagIcon size={18} /><span>{t("标签管理")}</span></button>
+        <button title={t("设置")} className={page === 'settings' ? 'nav-item active' : 'nav-item'} onClick={() => navigate('settings')} aria-current={page === 'settings' ? 'page' : undefined}><Settings2 size={18} /><span>{t("设置")}</span></button>
       </nav></div>
-      <div className="sidebar-footer"><div className="host-state"><span className={`connection-dot ${error ? 'offline' : ''}`} /><span>{error ? t("连接待恢复") : inventory ? t("库存手动扫描") : t("正在连接")}</span></div><p>{t("作品关联由目录配置维护")}<br />{t("发布状态由你维护")}</p><button className="theme-toggle" onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} aria-label={theme === 'dark' ? t("切换浅色主题") : t("切换深色主题")}>{theme === 'dark' ? <Sun size={17} /> : <Moon size={17} />}<span>{theme === 'dark' ? t("浅色外观") : t("深色外观")}</span></button></div>
+      <div className="sidebar-footer"><div className="host-state"><span className={`connection-dot ${error ? 'offline' : ''}`} /><span>{error ? t("连接待恢复") : inventory ? t("库存手动扫描") : t("正在连接")}</span></div><button className="theme-toggle" title={dark ? t('切换浅色主题') : t('切换深色主题')} onClick={() => setTheme(dark ? 'light' : 'dark')} aria-label={dark ? t("切换浅色主题") : t("切换深色主题")}>{dark ? <Sun size={17} /> : <Moon size={17} />}<span>{dark ? t('切换浅色') : t('切换深色')}</span></button><button className="theme-toggle sidebar-toggle" aria-expanded={!sidebarCollapsed} aria-label={t(sidebarCollapsed ? '展开侧栏' : '收起侧栏')} title={t(sidebarCollapsed ? '展开侧栏' : '收起侧栏')} onClick={() => setSidebarCollapsed(!sidebarCollapsed)}>{sidebarCollapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}<span>{t(sidebarCollapsed ? '展开侧栏' : '收起侧栏')}</span></button></div>
     </aside>
     <main id="main-content" className="main-content" tabIndex={-1}>
-      <div className="page-kicker"><span>{t("我的工作空间")}<ChevronRight size={13} /> {page === 'inventory' || page === 'detail' ? t("作品库") : t("工作流")}</span><span className="last-updated">{t("最近扫描 ·")}{formatDate(inventory?.last_scan?.at)}</span></div>
+      <div className="page-kicker"><span className="last-updated">{t("最近扫描 ·")}{formatDate(inventory?.last_scan?.at)}</span></div>
       {page !== 'detail' && <header className="page-header"><div><h1 tabIndex={-1}>{title}</h1><p>{subtitle}</p></div><button className="button primary" onClick={() => void scan()} disabled={busy}>{busy ? <LoaderCircle size={17} className="spin" /> : <RefreshCw size={17} />}<span>{busy ? t("正在扫描") : t("立即扫描")}</span></button></header>}
       {notice && <div className={`notice ${notice.kind}`} role={notice.kind === 'error' ? 'alert' : 'status'}><span>{notice.kind === 'error' ? <CircleAlert size={18} /> : notice.kind === 'success' ? <Check size={18} /> : <RefreshCw size={18} />}{t(notice.message)}</span><button className="icon-button" aria-label={t("关闭提示")} onClick={() => setNotice(null)}><X size={17} /></button></div>}
       {currentJob && <div className="scan-banner" role="status"><LoaderCircle className="spin" size={16} /><span>{t("后台正在扫描素材并更新封面")}</span><button onClick={() => navigate('jobs')}>{t("查看进度")}<ArrowRight size={14} /></button></div>}
-      {page === 'detail' && detailId !== null && <WorkDetail key={detailId} ref={detailGuard} presentation="page" id={detailId} capabilities={capabilities} onClose={backToInventory} onSaved={() => setRevision(value => value + 1)} notify={notify} />}
+      {page === 'detail' && detailId !== null && <WorkDetail key={detailId} ref={detailGuard} presentation="page" backLabel={({ calendar: '返回发布日历', profile: '返回个人中心', issues: '返回待处理', jobs: '返回任务记录', tags: '返回标签管理' } as Partial<Record<Page, string>>)[returnPage] || '返回库存'} id={detailId} capabilities={capabilities} onClose={backToInventory} onSaved={() => setRevision(value => value + 1)} notify={notify} />}
       {page === 'inventory' && <>
-        <div className="inventory-overview"><span><strong>{inventory ? inventory.total : '—'}</strong> {t("个库存", { count: inventory?.total || 0 })}{issuesOnly ? ` · ${t("异常")}` : filter === 'to_make' ? ` · ${t('待制作')}` : filter === 'pending' ? ` · ${t("待发布")}` : filter === 'es_published' ? ` · ${t("ES 已发布")}` : filter === 'patreon_published' ? ` · ${t("Patreon 已发布")}` : filter === 'published' ? ` · ${t("全部平台已发布")}` : ''}</span><span>{t("按目录配置识别素材")}</span></div>
-        <div className="toolbar"><label className="search-field"><Search size={18} aria-hidden="true" /><span className="sr-only">{t("搜索编号、标题或标签")}</span><input type="search" placeholder={t("搜索编号、标题、标签…")} value={query} onChange={event => setQuery(event.target.value)} /></label><div className="toolbar-options"><button className={`button filter-button ${issuesOnly ? 'selected' : ''}`} aria-pressed={issuesOnly} onClick={() => { setIssuesOnly(!issuesOnly); setNumber(1); }}><SlidersHorizontal size={16} />{t("仅看异常")}</button><div className="view-switch" aria-label={t("库存显示方式")}><button className="icon-button" aria-pressed={view === 'gallery'} onClick={() => setView('gallery')} aria-label={t("封面画廊")}><LayoutGrid size={18} /></button><button className="icon-button" aria-pressed={view === 'list'} onClick={() => setView('list')} aria-label={t("紧凑目录")}><List size={19} /></button><button className="icon-button" aria-pressed={view === 'tags'} onClick={() => setView('tags')} aria-label={t("标签列表")}><TagIcon size={18} /></button></div></div></div>
-        <div className="tag-inventory-filters"><label className="tag-filter"><span>{t("按标签筛选")}</span><select value={tagId || ''} onChange={event => { setTagId(event.target.value ? Number(event.target.value) : null); setUntaggedOnly(false); setNumber(1); }}><option value="">{t("全部标签")}</option>{tagCategories.map(([category, label]) => { const options = (catalog?.items || []).filter(tag => tag.category === category); return options.length ? <optgroup key={category} label={t(label)}>{options.map(tag => <option key={tag.id} value={tag.id}>{t(label)} · {tagName(tag)}</option>)}</optgroup> : null; })}</select></label><label className="untagged-filter"><input type="checkbox" checked={untaggedOnly} onChange={event => { setUntaggedOnly(event.target.checked); setTagId(null); setNumber(1); }} />{t("仅看未标注")}</label>{view === 'tags' && <span className="help-text">{t("不加载封面，快速维护作品标签")}</span>}<div className="tag-color-legend" aria-label={t("标签颜色分类")}>{tagCategories.map(([category, label]) => <span className={`tag-chip ${category}`} key={category}>{t(label)}</span>)}</div></div>
+        <div className="toolbar"><label className="search-field"><Search size={18} aria-hidden="true" /><span className="sr-only">{t("搜索编号、标题或标签")}</span><input type="search" placeholder={t("搜索编号、标题、标签…")} value={query} onChange={event => setQuery(event.target.value)} /></label><div className="toolbar-options"><button className={`button filter-button ${selectedSummary ? 'selected' : ''}`} aria-label={t('组合筛选')} aria-expanded={filtersOpen} onClick={() => setFiltersOpen(true)}><SlidersHorizontal size={16} />{t('组合筛选')}{tagIds.length > 0 && <span>{tagIds.length}</span>}</button><div className="view-switch" aria-label={t("库存显示方式")}><button className="icon-button" aria-pressed={view === 'gallery'} onClick={() => setView('gallery')} aria-label={t("封面画廊")}><LayoutGrid size={18} /><span>{t('画廊')}</span></button><button className="icon-button" aria-pressed={view === 'list'} onClick={() => setView('list')} aria-label={t("紧凑目录")}><List size={19} /><span>{t('紧凑目录')}</span></button><button className="icon-button" aria-pressed={view === 'tags'} onClick={() => setView('tags')} aria-label={t("标签列表")}><TagIcon size={18} /><span>{t('标签列表')}</span></button></div></div></div>
+        {selectedSummary && <div className="inventory-filter-summary"><button title={selectedSummary} onClick={() => setFiltersOpen(true)}><SlidersHorizontal size={14} /><span>{selectedSummary}</span></button><button className="text-action" onClick={clearFilters}>{t('清除筛选')}</button></div>}
+        <div className="inventory-overview"><span><strong>{inventory ? inventory.total : '—'}</strong> {t("个库存", { count: inventory?.total || 0 })}</span><div className="inventory-sort"><span>{t('发布日期')}</span><div className="view-switch" aria-label={t('按平台发布日期排序')}>{(['es', 'patreon'] as const).map(platform => <button key={platform} className="icon-button" aria-pressed={sortPlatform === platform} onClick={() => changeSortPlatform(platform)}>{platform === 'es' ? 'ES' : 'Patreon'}</button>)}</div><button className="icon-button" aria-label={t(sortDirection === 'desc' ? '当前从新到旧，点击切换从旧到新' : '当前从旧到新，点击切换从新到旧')} onClick={() => changeSortDirection(sortDirection === 'desc' ? 'asc' : 'desc')}>{sortDirection === 'desc' ? <ArrowDownWideNarrow size={18} /> : <ArrowUpWideNarrow size={18} />}</button></div></div>
         {tagError && <div className="notice error" role="alert"><span>{t("无法读取标签筛选：")}{t(tagError)}</span><button className="button small" onClick={refreshTags}>{t("重试")}</button></div>}
         {error && <div className="notice error" role="alert"><span><CircleAlert size={18} />{t("无法更新库存：")}{t(error)}. {inventory ? t("当前显示上次读取的数据。") : ''}</span><button className="button small" onClick={() => setRevision(value => value + 1)}>{t("重试")}</button></div>}
-        {loading ? <Loading /> : !inventory ? <EmptyState title={t("暂时无法读取库存")} description={t("确认工作台服务已启动，然后重新连接。")}><button className="button" onClick={() => setRevision(value => value + 1)}><RefreshCw size={16} />{t("重新连接")}</button></EmptyState> : !inventory.items.length ? <EmptyState title={search || issuesOnly || tagId || untaggedOnly ? t("没有符合条件的作品") : filter === 'to_make' ? t('暂无待制作作品') : filter === 'pending' ? t('暂无待发布作品') : filter !== 'all' ? t("没有符合条件的作品") : t("这里还没有库存")} description={search || issuesOnly || tagId || untaggedOnly ? t("换一个编号、标题或标签，或取消筛选。") : filter === 'to_make' ? t('无脚本的编号目录会在扫描后显示；补齐脚本后仍需手动确认制作完成。') : filter === 'pending' ? t('已有脚本、制作已确认且尚未全部发布的作品会显示在这里。') : t("将作品文件夹放入配置的扫描目录后，点击“立即扫描”更新库存。")}>{(search || issuesOnly || tagId || untaggedOnly) && <button className="button" onClick={() => { setQuery(''); setSearch(''); setIssuesOnly(false); setTagId(null); setUntaggedOnly(false); }}>{t("清除筛选")}</button>}</EmptyState> : view === 'tags' ? <div className="work-tag-list" aria-label={t("快速标签库存列表")}>{inventory.items.map(work => <article className="work-tag-row" key={work.id}><div className="work-tag-identity"><span className="script-id">{workIdentity(work)}</span><PublicationBadges work={work} /><ReleaseDates work={work} />{workDisplayTitle(work) && <h2>{workDisplayTitle(work)}</h2>}</div><TagChips tags={work.tags} durationStatus={work.duration_status} durationError={work.duration_error} /><WorkLinkButtons work={work} onEdit={kind => setLinkWork({ work, kind })} /><button className="button small" onClick={() => setTagWork(work)} aria-label={t("编辑标签 {0}", {"0": workIdentity(work)})}><TagIcon size={15} />{t("编辑标签")}</button></article>)}</div> : <div className={`work-collection ${view}`} aria-label={t("库存作品")}>
-          {inventory.items.map(work => <article key={work.id} className="work-card"><button type="button" className="work-card-target" data-work-id={work.id} onClick={() => view === 'gallery' ? openWork(work.id) : setSelected(work.id)} aria-label={t("查看 {0} {1}", {"0": workIdentity(work), "1": workDisplayTitle(work) || ""}).trim()} /><Cover work={work} /><div className="work-info"><div className="work-topline"><span className="script-id">{workIdentity(work)}</span><PublicationBadges work={work} /></div><ReleaseDates work={work} />{workDisplayTitle(work) && <h2>{workDisplayTitle(work)}</h2>}<TagChips tags={work.tags} durationStatus={work.duration_status} durationError={work.duration_error} /><div className="work-foot"><div className="work-foot-tools"><span className="asset-count"><Film size={14} />{work.video_count}<span className="separator" /><FileText size={14} />{work.script_count}</span><WorkLinkButtons work={work} onEdit={kind => setLinkWork({ work, kind })} /></div>{work.issues.length ? <span className="issue-label"><CircleAlert size={14} />{work.issues.length} {t("项异常")}</span> : <span className="work-type">{(work.axis_type ? tagName({ category: 'axis_type', name: work.axis_type }) : work.video_type) || t("素材已关联")}</span>}</div></div></article>)}
+        {loading ? <Loading /> : !inventory ? <EmptyState title={t("暂时无法读取库存")} description={t("确认工作台服务已启动，然后重新连接。")}><button className="button" onClick={() => setRevision(value => value + 1)}><RefreshCw size={16} />{t("重新连接")}</button></EmptyState> : !inventory.items.length ? <EmptyState title={search || issuesOnly || tagIds.length || untaggedOnly ? t("没有符合条件的作品") : filter === 'to_make' ? t('暂无待制作作品') : filter === 'pending' ? t('暂无待发布作品') : filter !== 'all' ? t("没有符合条件的作品") : t("这里还没有库存")} description={search || issuesOnly || tagIds.length || untaggedOnly ? t("换一个编号、标题或标签，或取消筛选。") : filter === 'to_make' ? t('无脚本的编号目录会在扫描后显示；补齐脚本后仍需手动确认制作完成。') : filter === 'pending' ? t('已有脚本、制作已确认且尚未全部发布的作品会显示在这里。') : t("将作品文件夹放入配置的扫描目录后，点击“立即扫描”更新库存。")}>{(search || issuesOnly || tagIds.length > 0 || untaggedOnly) && <button className="button" onClick={clearFilters}>{t("清除筛选")}</button>}</EmptyState> : view === 'tags' ? <div className="work-tag-list" aria-label={t("快速标签库存列表")}>{inventory.items.map(work => <article className="work-tag-row" key={work.id}><div className="work-tag-identity"><span className="script-id">{workIdentity(work)}</span><PublicationBadges work={work} />{workDisplayTitle(work) && <h2>{workDisplayTitle(work)}</h2>}</div><TagChips tags={work.tags} durationStatus={work.duration_status} durationError={work.duration_error} /><WorkLinkButtons work={work} onEdit={kind => setLinkWork({ work, kind })} /><button className="button small" onClick={() => setTagWork(work)} aria-label={t("编辑标签 {0}", {"0": workIdentity(work)})}><TagIcon size={15} />{t("编辑标签")}</button></article>)}</div> : <div className={`work-collection ${view}`} aria-label={t("库存作品")}>
+          {inventory.items.map(work => <article key={work.id} className="work-card"><button type="button" className="work-card-target" data-work-id={work.id} onClick={() => view === 'gallery' ? openWork(work.id) : setSelected(work.id)} aria-label={t("查看 {0} {1}", {"0": workIdentity(work), "1": workDisplayTitle(work) || ""}).trim()} /><Cover work={work} /><div className="work-info"><div className="work-topline"><span className="script-id">{workIdentity(work)}</span>{workDisplayTitle(work) && <h2>{workDisplayTitle(work)}</h2>}</div><PublicationBadges work={work} /><TagChips tags={work.tags} durationStatus={work.duration_status} durationError={work.duration_error} /><div className="work-foot"><span className="asset-count"><Film size={15} />{work.video_count} {t('视频')}<FileText size={15} />{work.script_count} {t('脚本')}</span><button className="card-edit-tags text-action" onClick={() => setTagWork(work)} aria-label={t("编辑标签 {0}", {"0": workIdentity(work)})}><TagIcon size={15} />{t('编辑标签')}</button></div><WorkLinkButtons work={work} onEdit={kind => setLinkWork({ work, kind })} />{!!work.issues.length && <span className="issue-label"><CircleAlert size={14} />{work.issues.length} {t("项异常")}</span>}</div></article>)}
         </div>}
         {!!inventory?.total && <div className="pagination"><span>{t('第 {page} / {pages} 页 · 每页 {size} 个', { page: Math.min(number, totalPages), pages: totalPages, size: PAGE_SIZE })}</span><div><button className="icon-button" aria-label={t("上一页")} onClick={() => { setNumber(value => value - 1); window.scrollTo({ top: 0, behavior: 'auto' }); }} disabled={number <= 1 || loading}><ArrowLeft size={17} /></button><span aria-live="polite">{number}</span><button className="icon-button" aria-label={t("下一页")} onClick={() => { setNumber(value => value + 1); window.scrollTo({ top: 0, behavior: 'auto' }); }} disabled={number >= totalPages || loading}><ArrowRight size={17} /></button></div></div>}
       </>}
-      {page === 'calendar' && <ReleaseCalendar revision={revision} onSelect={setSelected} onChanged={() => setRevision(value => value + 1)} />}
-      {page === 'issues' && <IssuesPage revision={revision} onSelect={setSelected} onChanged={() => setRevision(value => value + 1)} />}
+      {page === 'calendar' && <ReleaseCalendar revision={revision} onSelect={openWork} onChanged={() => setRevision(value => value + 1)} />}
+      {page === 'issues' && <IssuesPage revision={revision} onSelect={openWork} onChanged={() => setRevision(value => value + 1)} />}
       {page === 'jobs' && <JobsPage revision={revision} />}
-      {page === 'settings' && <><LanguageSettings collapsible />{profileLoading ? <p className="loading-state" role="status">{t("正在读取工作台资料…")}</p> : profileError ? <div className="notice error" role="alert"><span>{t(profileError)}</span><button className="button small" onClick={() => setProfileRetry(value => value + 1)}>{t("重试读取资料")}</button></div> : <ProfileSettings collapsible profile={profile} onSaved={value => { setProfile(value); notify({ kind: 'success', message: t("工作台资料已保存") }); }} />}{SHOW_ES_POSTS && <EsTemplateSettings />}<SettingsPage collapsible capabilities={capabilities} revision={revision} /></>}
+      {page === 'settings' && <SettingsWorkbench capabilities={capabilities} revision={revision} theme={theme} onTheme={setTheme} view={view} onView={setView} spring={spring} onSpring={setSpring} reduceMotion={reduceMotion} onReduceMotion={setReduceMotion} sortPlatform={sortPlatform} onSortPlatform={changeSortPlatform} sortDirection={sortDirection} onSortDirection={changeSortDirection} />}
+      {page === 'profile' && <PersonalPage profile={profile} loading={profileLoading} error={profileError} onRetry={() => setProfileRetry(value => value + 1)} onSaved={value => { setProfile(value); notify({ kind: 'success', message: t('工作台资料已保存') }); }} inventory={inventory} onNavigate={navigate} onSelect={openWork} />}
       {page === 'tags' && <TagsPage revision={revision} onChanged={() => setRevision(value => value + 1)} />}
       <footer className="page-footer"><span>{t("Funscript 工作台")}</span><span>{t("库存与状态保存在服务端")}</span></footer>
     </main>
     {selected !== null && <WorkDetail id={selected} capabilities={capabilities} onClose={() => setSelected(null)} onSaved={() => setRevision(value => value + 1)} notify={notify} />}
     {tagWork && <WorkTagEditor work={tagWork} onClose={() => setTagWork(null)} onSaved={tagsSaved} />}
     {linkWork && <WorkLinkEditor work={linkWork.work} initialKind={linkWork.kind} onClose={() => setLinkWork(null)} onSaved={linksSaved} />}
+    {filtersOpen && <InventoryFilters catalog={catalog} selected={tagIds} onChange={ids => { setTagIds(ids); setNumber(1); }} issuesOnly={issuesOnly} untaggedOnly={untaggedOnly} onIssuesChange={value => { setIssuesOnly(value); setNumber(1); }} onUntaggedChange={value => { setUntaggedOnly(value); setNumber(1); }} onClose={() => setFiltersOpen(false)} />}
   </div>;
 }

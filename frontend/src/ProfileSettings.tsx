@@ -17,7 +17,7 @@ async function requestProfile(init?: RequestInit): Promise<ProfileData> {
   return body;
 }
 
-export function ProfileSettings({ profile, onSaved, collapsible = false }: { profile: ProfileData; onSaved: (profile: ProfileData) => void; collapsible?: boolean }) {
+export function ProfileSettings({ profile, onSaved, onCancel, collapsible = false }: { profile: ProfileData; onSaved: (profile: ProfileData) => void; onCancel?: () => void; collapsible?: boolean }) {
   useI18n();
   const [baseline, setBaseline] = useState(profile);
   const [draft, setDraft] = useState(profile);
@@ -92,6 +92,7 @@ export function ProfileSettings({ profile, onSaved, collapsible = false }: { pro
       {message && <p className="profile-success" role="status">{translate(message)}</p>}
       <div className="profile-save-actions">
         <button className="button primary" type="submit" disabled={busy || reading || !dirty || !draft.name.trim()}>{busy ? <LoaderCircle size={16} aria-hidden="true" /> : <Check size={16} aria-hidden="true" />}{busy ? translate('正在保存') : translate('保存工作台资料')}</button>
+        <button className="button" type="button" disabled={busy || reading} onClick={() => { setDraft(baseline); setError(''); setMessage(''); setConflict(false); onCancel?.(); }}>{translate('取消')}</button>
         {conflict && <button type="button" className="button" disabled={busy || reading} onClick={() => void reload()}>{translate("重新加载资料（替换当前输入）")}</button>}
       </div>
     </form>

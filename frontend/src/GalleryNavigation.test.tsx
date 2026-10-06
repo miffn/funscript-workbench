@@ -117,12 +117,14 @@ async function filteredGallery() {
   fireEvent.click(within(navigation).getByRole('button', { name: /^待发布/ }));
   await waitFor(() => expect(latestInventoryParams().get('status')).toBe('pending'));
   fireEvent.change(screen.getByRole('searchbox', { name: '搜索编号、标题或标签' }), { target: { value: 'needle' } });
-  fireEvent.change(screen.getByLabelText('按标签筛选'), { target: { value: '1' } });
-  fireEvent.click(screen.getByRole('button', { name: '仅看异常' }));
+  fireEvent.click(screen.getByRole('button', { name: '组合筛选' }));
+  fireEvent.click(screen.getByRole('button', { name: '作者 A' }));
+  fireEvent.click(screen.getByLabelText('仅看异常'));
+  fireEvent.click(screen.getByRole('button', { name: '完成' }));
   await waitFor(() => {
     const params = latestInventoryParams();
     expect(params.get('q')).toBe('needle'); expect(params.get('status')).toBe('pending');
-    expect(params.get('tag_id')).toBe('1'); expect(params.get('issues_only')).toBe('true');
+    expect(params.get('tag_ids')).toBe('1'); expect(params.get('issues_only')).toBe('true');
   });
   await waitFor(() => expect((screen.getByRole('button', { name: '下一页' }) as HTMLButtonElement).disabled).toBe(false));
   fireEvent.click(screen.getByRole('button', { name: '下一页' }));
@@ -132,14 +134,14 @@ async function filteredGallery() {
 async function assertFilteredGallery() {
   await card(8);
   expect((screen.getByRole('searchbox', { name: '搜索编号、标题或标签' }) as HTMLInputElement).value).toBe('needle');
-  expect((screen.getByLabelText('按标签筛选') as HTMLSelectElement).value).toBe('1');
-  expect(screen.getByRole('button', { name: '仅看异常' }).getAttribute('aria-pressed')).toBe('true');
+  expect(document.querySelector('.inventory-filter-summary')?.textContent).toContain('作者 A');
+  expect(document.querySelector('.inventory-filter-summary')?.textContent).toContain('仅看异常');
   expect(within(screen.getByRole('complementary', { name: '工作台导航' })).getByRole('button', { name: /^待发布/ }).getAttribute('aria-current')).toBe('page');
   expect(screen.getByText('第 2 / 3 页 · 每页 24 个')).toBeTruthy();
   await waitFor(() => {
     const params = latestInventoryParams();
     expect(params.get('q')).toBe('needle'); expect(params.get('status')).toBe('pending');
-    expect(params.get('tag_id')).toBe('1'); expect(params.get('issues_only')).toBe('true'); expect(params.get('page')).toBe('2');
+    expect(params.get('tag_ids')).toBe('1'); expect(params.get('issues_only')).toBe('true'); expect(params.get('page')).toBe('2');
     expect(scrollWasRestored(612)).toBe(true);
   });
 }

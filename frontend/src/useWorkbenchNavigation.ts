@@ -3,12 +3,13 @@ import type { RefObject } from 'react';
 import type { Filter } from './api';
 import type { WorkDetailHandle } from './components';
 
-export type Page = 'inventory' | 'detail' | 'issues' | 'jobs' | 'settings' | 'tags' | 'calendar';
+export type Page = 'inventory' | 'detail' | 'issues' | 'jobs' | 'settings' | 'tags' | 'calendar' | 'profile';
 export interface Route { page: Page; filter: Filter; workId: number | null }
 export interface InventoryPosition {
   filter: Filter; query: string; search: string; number: number; issuesOnly: boolean;
   tagId: number | null; untaggedOnly: boolean; view: 'gallery' | 'list' | 'tags';
   scrollY: number; focusWorkId?: number;
+  tagIds?: number[]; sortPlatform?: 'es' | 'patreon'; sortDirection?: 'asc' | 'desc';
 }
 export interface NavigationEntry {
   index: number; inventory?: InventoryPosition; returnInventory?: InventoryPosition;
@@ -22,7 +23,7 @@ export function routeFromHash(hash: string): Route {
   const work = /^works\/([1-9]\d*)$/.exec(path);
   if (work && Number.isSafeInteger(Number(work[1]))) return { page: 'detail', filter: 'all', workId: Number(work[1]) };
   if (filters.includes(path as Filter) && path !== 'all') return { page: 'inventory', filter: path as Filter, workId: null };
-  if (['issues', 'jobs', 'settings', 'tags', 'calendar'].includes(path)) return { page: path as Page, filter: 'all', workId: null };
+  if (['issues', 'jobs', 'settings', 'tags', 'calendar', 'profile'].includes(path)) return { page: path as Page, filter: 'all', workId: null };
   return { page: 'inventory', filter: 'all', workId: null };
 }
 
@@ -36,14 +37,18 @@ function position(value: unknown): InventoryPosition | undefined {
       || !Number.isFinite(item.scrollY) || item.scrollY < 0) return;
   return { filter: item.filter, query: item.query, search: item.search, number: item.number,
     issuesOnly: item.issuesOnly, tagId: item.tagId, untaggedOnly: item.untaggedOnly, view: item.view,
-    scrollY: item.scrollY, ...(Number.isSafeInteger(item.focusWorkId) && item.focusWorkId! > 0 ? { focusWorkId: item.focusWorkId } : {}) };
+    scrollY: item.scrollY,
+    ...(Array.isArray(item.tagIds) ? { tagIds: item.tagIds.filter(id => Number.isSafeInteger(id) && id > 0).slice(0, 100) } : {}),
+    ...(['es', 'patreon'].includes(item.sortPlatform || '') ? { sortPlatform: item.sortPlatform } : {}),
+    ...(['asc', 'desc'].includes(item.sortDirection || '') ? { sortDirection: item.sortDirection } : {}),
+    ...(Number.isSafeInteger(item.focusWorkId) && item.focusWorkId! > 0 ? { focusWorkId: item.focusWorkId } : {}) };
 }
 
 function entry(): NavigationEntry | undefined {
   const saved = window.history.state?.[KEY];
   if (!saved || !Number.isSafeInteger(saved.index)) return;
   return { index: saved.index, inventory: position(saved.inventory), returnInventory: position(saved.returnInventory),
-    ...(typeof saved.returnHash === 'string' && /^#\/?(?:inventory|pending|published|to_make|es_published|patreon_published)$/.test(saved.returnHash)
+    ...(typeof saved.returnHash === 'string' && /^#\/?(?:inventory|pending|published|to_make|es_published|patreon_published|calendar|profile|jobs|issues|tags)$/.test(saved.returnHash)
       ? { returnHash: saved.returnHash } : {}),
     ...(Number.isSafeInteger(saved.fromIndex) ? { fromIndex: saved.fromIndex } : {}) };
 }
@@ -134,6 +139,7 @@ export function useWorkbenchNavigation({ getInventory, onRoute, detailRef }: {
   }, []);
 
   return {
+    returnPage: routeFromHash(current.current.saved.returnHash || '#/inventory').page,
     navigate(page: Exclude<Page, 'detail'>, filter: Filter = 'all') {
       leave(() => { saveInventory(); push(`#/${page === 'inventory' ? filter === 'all' ? 'inventory' : filter : page}`); });
     },
@@ -145,9 +151,9 @@ export function useWorkbenchNavigation({ getInventory, onRoute, detailRef }: {
     backToInventory() {
       // WorkDetail's onClose is already approved by its own requestLeave guard.
       const saved = current.current.saved;
-      if (saved.returnHash && saved.returnInventory && saved.fromIndex === saved.index - 1) {
+      if (saved.returnHash && saved.fromIndex === saved.index - 1) {
         allowedPop.current = { hash: saved.returnHash,
-          saved: { index: saved.fromIndex, inventory: saved.returnInventory } };
+          saved: { index: saved.fromIndex, ...(saved.returnInventory ? { inventory: saved.returnInventory } : {}) } };
         window.history.back();
       } else push('#/inventory');
     },

@@ -53,6 +53,7 @@ export function ReleaseCalendar({ revision = 0, onSelect, onChanged }: { revisio
   const [mode, setMode] = useState<CalendarMode>('actual');
   const [platformFilter, setPlatformFilter] = useState<'all' | PublicationPlatform>('all');
   const [modeFilter, setModeFilter] = useState<'all' | CalendarMode>('all');
+  const [view, setView] = useState<'month' | 'agenda'>('month');
   const [query, setQuery] = useState('');
   const [selectedEventKey, setSelectedEventKey] = useState<string | null>(null);
   const [selectedEventRevision, setSelectedEventRevision] = useState('');
@@ -151,6 +152,7 @@ export function ReleaseCalendar({ revision = 0, onSelect, onChanged }: { revisio
     <div className="calendar-toolbar">
       <div className="calendar-month-nav"><button className="icon-button" aria-label={t('上个月')} onClick={() => navigateMonth(-1)} disabled={busy}><ArrowLeft size={18} /></button><h2>{locale === 'en' ? new Intl.DateTimeFormat('en', { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(monthDate(month)) : t('{year} 年 {month} 月', { year: Number(month.slice(0, 4)), month: Number(month.slice(5, 7)) })}</h2><button className="icon-button" aria-label={t('下个月')} onClick={() => navigateMonth(1)} disabled={busy}><ArrowRight size={18} /></button><button className="button small" onClick={() => { setMonth(today.slice(0, 7)); selectDay(today); }} disabled={busy}>{t('今天')}</button></div>
       <div className="calendar-filters"><label>{t('平台筛选')}<select value={platformFilter} onChange={event => setPlatformFilter(event.target.value as typeof platformFilter)}><option value="all">{t('全部平台')}</option><option value="es">ES</option><option value="patreon">Patreon</option></select></label><label>{t('记录筛选')}<select value={modeFilter} onChange={event => setModeFilter(event.target.value as typeof modeFilter)}><option value="all">{t('全部记录')}</option><option value="planned">{t('发布计划')}</option><option value="actual">{t('已发布记录')}</option></select></label></div>
+      <div className="calendar-view-switch" role="group" aria-label={t('日历视图')}><button type="button" aria-pressed={view === 'month'} onClick={() => setView('month')}>{t('月历')}</button><button type="button" aria-pressed={view === 'agenda'} onClick={() => setView('agenda')}>{t('日程')}</button></div>
     </div>
     {loadError && <div className="notice error" role="alert"><span><CircleAlert size={17} />{t('无法读取日历：{error}', { error: t(loadError) })}</span><button className="button small" onClick={() => setRefresh(value => value + 1)}>{t('重试')}</button></div>}
     {actionError && <div className="notice error" role="alert"><span><CircleAlert size={17} />{t(actionError)}</span></div>}
@@ -158,7 +160,7 @@ export function ReleaseCalendar({ revision = 0, onSelect, onChanged }: { revisio
     <div className="calendar-layout">
       <div className="calendar-main">
         <div className="calendar-legend"><span className="calendar-platform es">ES</span><span className="calendar-platform patreon">Patreon</span><span className="calendar-legend-actual">{t('已发布')}</span><span className="calendar-legend-plan">{t('计划')}</span>{loading && <span className="calendar-reading" role="status"><LoaderCircle size={14} className="spin" />{t('读取中')}</span>}</div>
-        <div className="calendar-grid" role="group" aria-label={t('{month} 月历', { month })} aria-busy={loading}>
+        {view === 'month' ? <div className="calendar-grid" role="group" aria-label={t('{month} 月历', { month })} aria-busy={loading}>
           {WEEKDAYS.map(day => <div className="calendar-weekday" key={day}>{locale === 'en' ? ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][WEEKDAYS.indexOf(day)] : `周${day}`}</div>)}
           {days.map(date => { const entries = eventsByDay.get(date) || []; const groups = groupCalendarEvents(entries); return <div key={date} className={`calendar-day ${date.slice(0, 7) !== month ? 'outside' : ''} ${date === today ? 'today' : ''} ${date === selectedDate ? 'selected' : ''} ${date === dropTarget ? 'drop-target' : ''}`} onDragOver={event => { if (drag.current && !disabled) { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; setDropTarget(date); } }} onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropTarget(null); }} onDrop={event => dropOnDay(event, date)}>
             <button className="calendar-date-button" aria-label={date} aria-pressed={date === selectedDate} onClick={() => selectDay(date)}><span>{Number(date.slice(8, 10))}</span>{date === today && <span className="calendar-today-label">{t('今天')}</span>}<span className="sr-only">{t('{count} 条记录', { count: groups.length })}</span></button>
@@ -168,7 +170,16 @@ export function ReleaseCalendar({ revision = 0, onSelect, onChanged }: { revisio
             </div>)}{groups.length > 3 && <button className="calendar-more" onClick={() => selectDay(date)}>{t('另 {count} 条', { count: groups.length - 3 })}</button>}</div>
             {!!groups.length && <div className="calendar-mobile-count" aria-hidden="true">{entries.some(entry => entry.platform === 'es') && <span className="es" />}{entries.some(entry => entry.platform === 'patreon') && <span className="patreon" />}<span>{groups.length}</span></div>}
           </div>; })}
-        </div>
+        </div> : <div className="calendar-agenda" aria-label={t('本月发布日程')} aria-busy={loading}>
+          {[...eventsByDay.entries()].filter(([day]) => day.startsWith(month)).sort(([a], [b]) => a.localeCompare(b)).map(([day, entries]) => <section key={day} className="calendar-agenda-day">
+            <button className="calendar-agenda-date" aria-label={day} aria-pressed={day === selectedDate} onClick={() => selectDay(day)}><strong>{Number(day.slice(8, 10))}</strong><span>{dateLabel(day, locale)}</span></button>
+            <div className="calendar-agenda-events">{groupCalendarEvents(entries).map(group => <div className="calendar-entry-group" key={group[0].work_id}>
+              <div className="calendar-entry-title"><strong className="script-id">{workIdentity(group[0])}</strong><span>{titleFor(group[0])}</span></div>
+              <div className="calendar-group-platforms">{group.map(entry => <button key={entry.key} className={`calendar-entry ${entry.platform} ${entry.mode}`} onClick={() => selectEvent(entry)} aria-label={`${workIdentity(entry)} ${PLATFORM_LABEL[entry.platform]} ${eventLabel(entry)} ${entry.date}`}>{PLATFORM_LABEL[entry.platform]} · {eventLabel(entry)}</button>)}</div>
+            </div>)}</div>
+          </section>)}
+          {!visibleEvents.some(event => event.date.startsWith(month)) && !loading && <p className="calendar-empty">{t('本月暂无符合筛选的发布记录')}</p>}
+        </div>}
         <div className="calendar-selected-day"><div className="calendar-day-heading"><h3><CalendarDays size={18} />{t('{date}的记录', { date: dateLabel(selectedDate, locale) })}</h3><span>{t('{count} 条', { count: selectedGroups.length })}</span></div>{!selectedGroups.length ? <p className="calendar-empty">{t(modeFilter === 'planned' ? '当天暂无计划记录，可从库存添加。' : modeFilter === 'actual' ? '当天暂无发布记录，可从库存添加。' : '当天暂无记录，可从库存添加。')}</p> : <div className="calendar-entry-list">{selectedGroups.map(group => <div className="calendar-entry-group" key={group[0].work_id} role="group" aria-label={t('{name} 当日记录', { name: workIdentity(group[0]) })}>
           <div className="calendar-entry-title"><strong className="script-id">{workIdentity(group[0])}</strong>{titleFor(group[0]) && <span>{titleFor(group[0])}</span>}</div>
           <div className="calendar-group-platforms">{group.map(entry => <button className={`calendar-entry ${entry.platform} ${entry.mode} ${entry.key === selectedEventKey ? 'active' : ''}`} key={entry.key} onClick={() => selectEvent(entry)} draggable={!disabled} onDragStart={event => startDrag(event, { kind: 'event', key: entry.key })} onDragEnd={endDrag} aria-label={t('{name} {platform} {status} 当日记录', { name: workIdentity(entry), platform: PLATFORM_LABEL[entry.platform], status: eventLabel(entry) })}>{PLATFORM_LABEL[entry.platform]} · {eventLabel(entry)}</button>)}</div>

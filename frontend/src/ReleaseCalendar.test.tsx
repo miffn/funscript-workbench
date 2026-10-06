@@ -64,6 +64,19 @@ it('uses Beijing today, a Monday-to-Sunday grid and shows both platform plans', 
   expect(posts()).toHaveLength(0);
 });
 
+it('switches to the agenda and edits the same persisted platform record', async () => {
+  renderCalendar(); await ready();
+  fireEvent.click(screen.getByRole('button', { name: '日程' }));
+  expect(screen.queryByRole('group', { name: '2026-10 月历' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: 'S003 ES 已发布 2026-10-05' }));
+  fireEvent.change(screen.getByLabelText('记录日期'), { target: { value: '2026-10-09' } });
+  fireEvent.click(screen.getByRole('button', { name: '保存日期' }));
+  await screen.findByRole('button', { name: 'S003 ES 已发布 2026-10-09' });
+  expect(JSON.parse(posts()[0][1].body)).toMatchObject({ work_id: 3, platforms: ['es'], mode: 'actual', date: '2026-10-09' });
+  fireEvent.click(screen.getByRole('button', { name: '月历' }));
+  expect(screen.getByRole('group', { name: '2026-10 月历' })).toBeTruthy();
+});
+
 it('searches and schedules an unnumbered folder work using its name and stable work ID', async () => {
   works.push(work(4, { script_id: null, title: '普通文件夹' }));
   renderCalendar(); await ready();

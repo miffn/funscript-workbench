@@ -62,7 +62,7 @@ it('uses IDs independently from nullable numbers or editable titles', () => {
 it('shows an unnumbered work name on queued preview tasks without exposing a fake Script ID', async () => {
   fetchMock.mockImplementation(async () => response({ items: [{ id: 44, type: 'preview', status: 'queued', created_at: '2026-10-06T00:00:00Z', inputs: { work_id: 7, script_id: null, title: '普通文件夹' }, result: null }] }));
   render(<JobsPage revision={0} />);
-  expect(await screen.findByRole('heading', { name: /预览生成.*普通文件夹/ })).toBeTruthy();
+  expect(await screen.findByRole('button', { name: /预览生成.*普通文件夹/ })).toBeTruthy();
   expect(screen.queryByText(/^null$/)).toBeNull();
 });
 
@@ -133,11 +133,13 @@ it('blocks unavailable candidates and displays English operations without changi
   expect(posts()).toHaveLength(0);
 });
 
-it('keeps production and both platform operations together and resets only production while retaining local drafts', async () => {
+it('keeps production and both platform operations available and resets only production while retaining local drafts', async () => {
   detail(); await screen.findByLabelText('备注');
   const manager = screen.getByRole('heading', { name: '状态管理' }).closest('section')!;
-  expect(within(manager).getByRole('button', { name: '将 ES 改为未发布' })).toBeTruthy();
-  expect(within(manager).getByRole('button', { name: '将 Patreon 改为未发布' })).toBeTruthy();
+  expect(within(manager).getByRole('button', { name: '退回待制作' })).toBeTruthy();
+  const publication = screen.getByRole('heading', { name: '发布信息' }).closest('section')!;
+  expect(within(publication).getByRole('button', { name: '将 ES 改为未发布' })).toBeTruthy();
+  expect(within(publication).getByRole('button', { name: '将 Patreon 改为未发布' })).toBeTruthy();
   await waitFor(() => expect((screen.getByRole('button', { name: '退回待制作' }) as HTMLButtonElement).disabled).toBe(false));
   fireEvent.change(screen.getByLabelText('标题'), { target: { value: '未保存标题' } });
   fireEvent.change(screen.getByLabelText('备注'), { target: { value: '未保存备注' } });

@@ -33,10 +33,10 @@ def test_first_changed_post_links_get_independent_dates_and_states(inventory):
         assert result.json()[f'{kind}_published_date'] == '2026-10-01'
         if kind == 'patreon':
             assert result.json()['es_published_date'] is None
-            assert client.get(path).json()['patreon_published'] is False
+            assert client.get(path).json()['patreon_published'] is True
     work = client.get(path).json()
     listed = client.get('/api/works').json()['items'][0]
-    assert work['es_published'] is True and work['patreon_published'] is False
+    assert work['es_published'] is True and work['patreon_published'] is True
     assert work['es_published_date'] == work['patreon_published_date'] == '2026-10-01'
     assert listed['es_published_date'] == listed['patreon_published_date'] == '2026-10-01'
 
@@ -54,7 +54,7 @@ def test_manual_dates_preserved_when_replacing_or_clearing_links(inventory):
         assert result.json()['es_published_date'] == '2026-09-28'
         assert result.json()['patreon_published_date'] == '2026-09-27'
     work = client.get(path).json()
-    assert work['es_published'] is True and work['patreon_published'] is False
+    assert work['es_published'] is True and work['patreon_published'] is True
 
 
 def test_explicit_date_clear_wins_and_repeat_save_does_not_refill(inventory):
@@ -70,7 +70,8 @@ def test_explicit_date_clear_wins_and_repeat_save_does_not_refill(inventory):
     assert repeated.json()['es_published_date'] is repeated.json()['patreon_published_date'] is None
     changed = client.patch(path + '/links', json={'expected_revision': 2,
         'links': {'es': 'https://example.test/changed'}}).json()
-    assert changed['es_published_date'] == '2026-10-01'
+    # An already published URL edit preserves a deliberately cleared date too.
+    assert changed['es_published_date'] is None
     assert changed['patreon_published_date'] is None
 
 

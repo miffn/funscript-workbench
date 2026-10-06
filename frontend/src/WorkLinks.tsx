@@ -5,6 +5,7 @@ import type { FormEvent } from 'react';
 import { Check, CircleDollarSign, Copy, ExternalLink, FileDown, LoaderCircle, MessagesSquare, Video, X } from 'lucide-react';
 import { ApiError, errorMessage, request, safeLink } from './api';
 import type { Work, WorkLinkKind, WorkLinks, WorkLinkValues } from './api';
+import './ReleaseWorkbench.css';
 
 export const linkTypes = [
   { kind: 'patreon', label: 'Patreon 文章链接', short: 'Patreon', Icon: CircleDollarSign },
@@ -13,6 +14,11 @@ export const linkTypes = [
   { kind: 'es', label: 'ES 帖子链接', short: 'ES', Icon: MessagesSquare },
 ] as const;
 const emptyLinks: WorkLinkValues = { patreon: '', video: '', script: '', es: '' };
+const publicationFields = ['es_published', 'patreon_published', 'es_published_date', 'patreon_published_date', 'es_planned_date', 'patreon_planned_date'] as const;
+type PublicationDraft = Record<typeof publicationFields[number], boolean | string>;
+function publicationDraft(value: WorkLinks): PublicationDraft {
+  return Object.fromEntries(publicationFields.map(field => [field, field.endsWith('_published') ? !!value[field] : value[field] || ''])) as PublicationDraft;
+}
 
 export function WorkLinkButtons({ work, onEdit }: { work: Work; onEdit: (kind: WorkLinkKind) => void }) {
   useI18n();
@@ -38,6 +44,7 @@ export function WorkLinkEditor({ work, initialKind, onClose, onSaved }: {
   const copyLock = useRef(false);
   const [current, setCurrent] = useState<WorkLinks | null>(null);
   const [draft, setDraft] = useState<WorkLinkValues>(emptyLinks);
+  const [publication, setPublication] = useState<PublicationDraft | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -46,7 +53,8 @@ export function WorkLinkEditor({ work, initialKind, onClose, onSaved }: {
   const [retry, setRetry] = useState(0);
   const [copyFeedback, setCopyFeedback] = useState<{ kind: WorkLinkKind; status: 'copying' | 'copied' | 'failed' } | null>(null);
   const changed = linkTypes.filter(({ kind }) => draft[kind].trim() !== current?.links[kind]);
-  const dirty = !!current && changed.length > 0;
+  const publicationChanged = current && publication ? publicationFields.filter(field => publication[field] !== publicationDraft(current)[field]) : [];
+  const dirty = !!current && (changed.length > 0 || publicationChanged.length > 0);
   const close = () => { if (saving) return; if (dirty) setConfirmClose(true); else onClose(); };
   useEffect(() => {
     alive.current = true; dialog.current?.showModal();
@@ -56,7 +64,7 @@ export function WorkLinkEditor({ work, initialKind, onClose, onSaved }: {
   useEffect(() => {
     const controller = new AbortController(); setLoading(true);
     request<WorkLinks>(`/api/works/${work.id}/links`, { signal: controller.signal }).then(value => {
-      if (!controller.signal.aborted) { setCurrent(value); setDraft(value.links); setError(''); setConflict(false); setCopyFeedback(null); }
+      if (!controller.signal.aborted) { setCurrent(value); setDraft(value.links); setPublication(publicationDraft(value)); setError(''); setConflict(false); setCopyFeedback(null); }
     }).catch(error => { if (!controller.signal.aborted) setError(translate('无法读取链接：{error}', { error: errorMessage(error) })); })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
@@ -103,7 +111,9 @@ export function WorkLinkEditor({ work, initialKind, onClose, onSaved }: {
     }
     lock.current = true; setSaving(true); setError('');
     try {
-      const updated = await request<WorkLinks>(`/api/works/${work.id}/links`, { method: 'PATCH', body: JSON.stringify({ links: edits, expected_revision: current.links_revision }) });
+      const fields = Object.fromEntries(publicationChanged.map(field => [field, publication![field] === '' ? null : publication![field]]));
+      const updated = await request<WorkLinks>(`/api/works/${work.id}/links`, { method: 'PATCH', body: JSON.stringify({ links: edits, expected_revision: current.links_revision,
+        ...(current.publication_revision ? { expected_publication_revision: current.publication_revision } : {}), ...fields }) });
       if (alive.current) { onSaved(updated); onClose(); }
     } catch (error) {
       if (alive.current) {
@@ -117,13 +127,22 @@ export function WorkLinkEditor({ work, initialKind, onClose, onSaved }: {
     {confirmClose && <div className="discard-confirm" role="alert"><strong>{translate("链接修改尚未保存")}</strong><p>{translate("关闭会放弃本次输入。")}</p><div><button ref={keepEditing} className="button small" onClick={() => { setConfirmClose(false); initialInput.current?.focus(); }}>{translate("继续编辑链接")}</button><button className="button small" onClick={onClose}>{translate("放弃链接修改并关闭")}</button></div></div>}
     <div className="tag-dialog-body">
       <p className="help-text">{translate("链接绑定当前完整编号，保存后扫描或重启不会覆盖。清空输入并保存可移除链接。")}</p>
-      <p className="help-text">{translate("首次填写并保存 Patreon / ES 帖子链接时，发布日期默认记当天；可在作品详情手动修改。填写并保存 ES 帖子链接会自动标记 ES 已发布；Patreon 状态仍由你单独维护。移除链接不会撤回发布状态或日期。")}</p>
+      <p className="help-text">{translate("添加 ES / Patreon 链接后，该平台自动标记已发布，并记录当天日期。已发布链接修改保留原日期；移除链接保留状态和日期。")}</p>
       {error && <div className="notice error" role="alert"><span>{translate(error)}</span>{(conflict || !current) && <button className="button small" disabled={loading} onClick={() => setRetry(value => value + 1)}>{conflict ? translate('放弃输入并读取最新链接') : translate('重试读取链接')}</button>}</div>}
       {loading ? <p className="loading-state" role="status"><LoaderCircle className="spin" size={18} />{translate("正在读取发布链接")}</p> : current && <form id="work-links-form" className="work-links-form" onSubmit={event => void save(event)} noValidate>
+        {publication && <div className="release-platform-grid">{(['es', 'patreon'] as const).map(platform => {
+          const name = platform === 'es' ? 'ES' : 'Patreon';
+          const published = !!publication[`${platform}_published`];
+          return <section className="release-platform-panel" key={platform} aria-label={`${name} ${translate('发布信息')}`}>
+            <div className="release-platform-heading"><button type="button" className={`release-status-switch ${published ? 'published' : 'pending'}`} title={`${name} · ${translate(published ? '已发布' : '待发布')}`} aria-pressed={published} aria-label={translate('切换 {platform} 发布状态', { platform: name })} disabled={saving || conflict || !current.publication_revision} onClick={() => setPublication(previous => ({ ...previous!, [`${platform}_published`]: !published }))}>{name}</button></div>
+            <label htmlFor={`release-${platform}-planned`}>{translate('计划日期')}<input id={`release-${platform}-planned`} aria-label={`${name} ${translate('计划日期')}`} type="date" min="1900-01-01" max="9999-12-31" disabled={saving || conflict || !current.publication_revision} value={String(publication[`${platform}_planned_date`])} onChange={event => setPublication(previous => ({ ...previous!, [`${platform}_planned_date`]: event.target.value }))} /></label>
+            <label htmlFor={`release-${platform}-actual`}>{translate('发布日期')}<input id={`release-${platform}-actual`} aria-label={`${name} ${translate('发布日期')}`} type="date" min="1900-01-01" max="9999-12-31" disabled={saving || conflict} value={String(publication[`${platform}_published_date`])} onChange={event => setPublication(previous => ({ ...previous!, [`${platform}_published_date`]: event.target.value }))} /></label>
+          </section>;
+        })}</div>}
         {linkTypes.map(({ kind, label, Icon }) => <div className={`work-link-field ${kind === initialKind ? 'chosen' : ''}`} key={kind}>
           <label htmlFor={`work-link-${kind}`}><Icon size={16} aria-hidden="true" />{translate(label)}</label>
           <input ref={kind === initialKind ? initialInput : undefined} id={`work-link-${kind}`} type="url" inputMode="url" autoComplete="off" spellCheck={false} maxLength={4000} placeholder="https://…" value={draft[kind]} disabled={saving || conflict} onChange={event => { setDraft(previous => ({ ...previous, [kind]: event.target.value })); setError(''); }} />
-          {safeLink(current.links[kind]) && <div className="work-link-actions"><a href={safeLink(current.links[kind])!} target="_blank" rel="noreferrer">{translate("打开已保存的链接")} <ExternalLink size={12} aria-hidden="true" /></a><button type="button" className="button small" aria-label={translate('复制已保存的{label}', { label: translate(label) })} aria-busy={copyFeedback?.kind === kind && copyFeedback.status === 'copying'} onClick={() => void copySavedLink(kind)}>{copyFeedback?.kind === kind && copyFeedback.status === 'copied' ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}{translate('复制')}</button>{copyFeedback?.kind === kind && <span className={copyFeedback.status === 'failed' ? 'inline-error' : 'help-text'} role={copyFeedback.status === 'failed' ? 'alert' : 'status'}>{copyFeedback.status === 'copied' ? translate('已复制') : copyFeedback.status === 'failed' ? translate('复制失败，请手动复制输入框中的链接。') : translate('正在复制…')}</span>}</div>}
+          <div className="work-link-actions">{safeLink(current.links[kind]) && <a href={safeLink(current.links[kind])!} target="_blank" rel="noreferrer">{translate("打开已保存的链接")} <ExternalLink size={12} aria-hidden="true" /></a>}<button type="button" className="button small" disabled={!safeLink(current.links[kind])} aria-label={translate('复制已保存的{label}', { label: translate(label) })} aria-busy={copyFeedback?.kind === kind && copyFeedback.status === 'copying'} onClick={() => void copySavedLink(kind)}>{copyFeedback?.kind === kind && copyFeedback.status === 'copied' ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}{translate('复制')}</button>{copyFeedback?.kind === kind && <span className={copyFeedback.status === 'failed' ? 'inline-error' : 'help-text'} role={copyFeedback.status === 'failed' ? 'alert' : 'status'}>{copyFeedback.status === 'copied' ? translate('已复制') : copyFeedback.status === 'failed' ? translate('复制失败，请手动复制输入框中的链接。') : translate('正在复制…')}</span>}</div>
         </div>)}
       </form>}
     </div>
