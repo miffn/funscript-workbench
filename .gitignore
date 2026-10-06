@@ -11,3 +11,15 @@ data/
 .env
 
 preview_generator/build/
+
+# Local development instructions and internal planning documents
+AGENTS.md
+AGENTS.override.md
+agents.md
+CLAUDE.md
+docs/
+*REQUIREMENTS*.md
+*DESIGN*.md
+*IMPLEMENTATION*.md
+*PLAN*.md
+*SPEC*.md
