@@ -32,8 +32,8 @@ def invalidate_association(db, work_id):
     db.execute('DELETE FROM preview_bindings WHERE work_id=?', (work_id,))
 
 
-def directory_status(db, work_id, roots):
-    """Inspect availability for presentation only; discovery/recovery is scanner-owned."""
+def directory_status(db, work_id, roots, *, check_filesystem=True, unavailable_roots=()):
+    """Lists use scan results; details/actions can validate the current directory live."""
     rows = db.execute('SELECT * FROM directories WHERE work_id=?', (work_id,)).fetchall()
     if len([row for row in rows if row['available']]) > 1:
         return 'conflict'
@@ -43,6 +43,10 @@ def directory_status(db, work_id, roots):
     root = next((root for root in roots if str(root.path) == directory['root_path']), None)
     if root is None:
         return 'unavailable'
+    if not check_filesystem:
+        if directory['root_path'] in unavailable_roots:
+            return 'unavailable'
+        return 'available' if directory['available'] else 'missing'
     try:
         from .scan_roots import no_link_components, ScanRootsError
         no_link_components(root.path)
