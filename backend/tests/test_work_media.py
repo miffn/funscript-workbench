@@ -77,7 +77,7 @@ def test_local_video_ranges_head_and_cross_site_rejection(media):
     assert head.status_code == 200 and not head.content
     assert int(head.headers['content-length']) == video.stat().st_size
     assert client.get(url, headers={'Host': 'localhost:8788'}).status_code == 403
-    assert client.get(url, headers={**HOST, 'Host': '192.0.2.5:8787'}).status_code == 403
+    assert client.get(url, headers={**HOST, 'Host': '192.0.2.10:8787'}).status_code == 403
     assert client.get(url, headers={**HOST, 'Sec-Fetch-Site': 'cross-site'}).status_code == 403
     assert client.get(url, headers={**HOST, 'Origin': 'http://evil.example'}).status_code == 403
     assert client.get(f'/api/works/{work_id}/assets/{asset_id+100}/media', headers=HOST).status_code == 404
@@ -179,7 +179,7 @@ def test_cover_writes_are_host_only_and_simultaneous_saves_use_revision_cas(medi
     client, service, _store, _config, work_id, asset_id, _video = media
     token = frame(media)['frame_id']
     body = {'frame_id': token, 'expected_revision': 0, 'crop': {'x': 0, 'y': 0, 'width': 1, 'height': 1}}
-    for headers in ({'Host': '192.0.2.5:8787'}, {**HOST, 'Origin': 'http://evil.example'}, {'Host': 'localhost:8788'}):
+    for headers in ({'Host': '192.0.2.10:8787'}, {**HOST, 'Origin': 'http://evil.example'}, {'Host': 'localhost:8788'}):
         assert client.post(f'/api/works/{work_id}/cover', headers=headers, json=body).status_code == 403
         assert client.post(f'/api/works/{work_id}/cover/restore', headers=headers, json={'expected_revision': 0}).status_code == 403
         assert client.post(f'/api/works/{work_id}/cover/frames', headers=headers, json={'video_asset_id': asset_id, 'time_seconds': 0}).status_code == 403

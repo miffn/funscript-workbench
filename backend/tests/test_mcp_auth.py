@@ -89,8 +89,8 @@ def test_rotation_is_atomic_persistent_and_revokes_old_token(context):
 
 
 @pytest.mark.parametrize('headers', [
-    {'Host': '192.0.2.6:8787', 'Origin': 'http://192.0.2.6:8787'},
-    {**HOST, 'Host': '192.0.2.6:8787', 'Origin': 'http://192.0.2.6:8787'},
+    {'Host': '192.168.1.100:8787', 'Origin': 'http://192.168.1.100:8787'},
+    {**HOST, 'Host': '192.168.1.100:8787', 'Origin': 'http://192.168.1.100:8787'},
     {'Host': 'localhost:8788', 'Origin': 'http://localhost:8788'},
     {**HOST, 'Origin': 'http://attacker.example'},
     {key: value for key, value in HOST.items() if key != 'Origin'},
@@ -106,12 +106,12 @@ def test_management_requires_gateway_host_key_and_exact_origin(context, headers)
 def test_lan_can_read_with_token_but_cannot_manage_or_read_secret(context):
     client, _, _ = context
     token = reset(client).json()['token']
-    state = client.get('/api/mcp-auth', headers={'Host': '192.0.2.6:8787'}).json()
+    state = client.get('/api/mcp-auth', headers={'Host': '192.168.1.100:8787'}).json()
     assert state['enabled'] and not state['can_manage'] and 'token' not in state
-    assert client.post('/mcp', headers={**ACCEPT, 'Host': '192.0.2.6:8787',
+    assert client.post('/mcp', headers={**ACCEPT, 'Host': '192.168.1.100:8787',
                                       'Authorization': f'Bearer {token}'}, json=RPC).status_code == 200
-    assert reset(client, 1, {**HOST, 'Host': '192.0.2.6:8787',
-                           'Origin': 'http://192.0.2.6:8787', 'Authorization': f'Bearer {token}'}).status_code == 403
+    assert reset(client, 1, {**HOST, 'Host': '192.168.1.100:8787',
+                           'Origin': 'http://192.168.1.100:8787', 'Authorization': f'Bearer {token}'}).status_code == 403
 
 
 def test_duplicate_credentials_and_invalid_stored_state_fail_closed(context):

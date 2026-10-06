@@ -210,7 +210,7 @@ def test_host_open_denied_without_gateway_key_and_origin(inventory):
         assert client.get("/api/capabilities").json()["can_open_folder"] is False
         assert client.get("/api/capabilities", headers=headers).json()["can_open_folder"] is True
         assert client.post(f"/api/works/{work['id']}/open-folder").status_code == 403
-        for replacement in ({"X-Workbench-Host-Key": "wrong"}, {"Host": "192.0.2.6:8787", "Origin": "http://192.0.2.6:8787"}, {"Origin": "http://evil.example"}):
+        for replacement in ({"X-Workbench-Host-Key": "wrong"}, {"Host": "192.0.2.20:8787", "Origin": "http://192.0.2.20:8787"}, {"Origin": "http://evil.example"}):
             assert client.post(f"/api/works/{work['id']}/open-folder", headers={**headers, **replacement}).status_code == 403
         without_origin = {key: value for key, value in headers.items() if key != "Origin"}
         assert client.post(f"/api/works/{work['id']}/open-folder", headers=without_origin).status_code == 403

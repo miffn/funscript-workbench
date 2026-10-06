@@ -1,10 +1,40 @@
-﻿param(
-    [string]$LanHost = '192.0.2.6',
-    [string]$PythonPath = 'C:\Users\user\AppData\Local\Programs\Python\Python312\python.exe',
+param(
+    [string]$LanHost,
+    [string]$PythonPath,
     [switch]$Direct,
     [string]$ProjectPath = (Split-Path $PSScriptRoot -Parent)
 )
 $ErrorActionPreference = 'Stop'
+function Resolve-WorkbenchLanHost {
+    param([string]$Value, [string]$ConfigPath = (Join-Path $env:ProgramData 'ScriptWorkbench\config.json'))
+    if (-not [string]::IsNullOrWhiteSpace($Value)) { return $Value }
+    if (Test-Path -LiteralPath $ConfigPath -PathType Leaf) {
+        try {
+            $configured = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
+            if ($configured.LanHost -is [string] -and -not [string]::IsNullOrWhiteSpace($configured.LanHost)) {
+                return $configured.LanHost
+            }
+        } catch { throw 'Unable to read existing workbench configuration; provide -LanHost explicitly.' }
+    }
+    throw 'Provide -LanHost explicitly. A first-time setup has no default LAN address.'
+}
+function Resolve-WorkbenchPython {
+    param([string]$Value)
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        $launcher = Get-Command py -ErrorAction SilentlyContinue
+        if (-not $launcher) { throw 'Python 3.12 launcher is unavailable; provide -PythonPath explicitly.' }
+        $discovered = @(& $launcher.Source -3.12 -c 'import sys; print(sys.executable)' 2>$null)
+        if ($LASTEXITCODE -ne 0 -or $discovered.Count -ne 1) {
+            throw 'Python 3.12 could not be discovered; provide -PythonPath explicitly.'
+        }
+        $Value = [string]$discovered[0]
+    }
+    if ([string]::IsNullOrWhiteSpace($Value) -or -not (Test-Path -LiteralPath $Value -PathType Leaf)) {
+        throw 'Windows Python executable is unavailable; provide a valid -PythonPath.'
+    }
+    return $Value
+}
+$LanHost = Resolve-WorkbenchLanHost -Value $LanHost
 function Test-GatewayHealth {
     param([string]$CurrentLanHost)
     try {
@@ -29,6 +59,7 @@ if (-not $Direct -and $autostartTask) {
     }
     throw 'Autostart task has not become healthy; inspect %ProgramData%\ScriptWorkbench\autostart.log'
 }
+$PythonPath = Resolve-WorkbenchPython -Value $PythonPath
 $projectPath = $ProjectPath
 $executor = "$env:USERPROFILE\.codex\bin\Invoke-WslProject.ps1"
 & $executor -WorkingDirectory $projectPath -FilePath systemctl -ArgumentList @('--user', 'start', 'script-workbench.service')

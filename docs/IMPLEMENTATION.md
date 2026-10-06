@@ -15,7 +15,7 @@ D 盘源文件未修改。外部资料源未回写。发帖、剪辑、热力图
 WSL 用户服务 `script-workbench.service` 监听 127.0.0.1:8789。Windows 网关隐藏运行，提供：
 
 - 本机：`http://localhost:8788/#/inventory`。
-- 局域网：`http://192.0.2.6:8787/#/inventory`。
+- 局域网：`http://192.0.2.20:8787/#/inventory`。
 
 可收藏页面：`#/inventory`、`#/pending`、`#/published`、`#/issues`、`#/jobs`、`#/settings`。启动、停止与备份说明见 README。服务会随 WSL 用户服务启动；Windows 网关在电脑重启后需运行启动脚本。
 
@@ -25,7 +25,7 @@ WSL 用户服务 `script-workbench.service` 监听 127.0.0.1:8789。Windows 网�
 - 前端 Vitest：7 项通过，包含保存成功/失败、状态更新保留备注草稿、页内放弃/继续编辑、Escape、远程禁用目录、冲突路径选择、封面失败与安全历史链接。
 - `tsc -b && vite build` 通过；生产 JS 257.70 kB、CSS 24.87 kB（未压缩传输体积）。
 - 完整停止并重新启动后，58 个库存的状态与备注保持；重复启动正确复用健康进程。本机 capability 为 true，局域网为 false；LAN 与直接后端的目录打开请求均返回 403。
-- 从 WSL 虚拟机通过 `192.0.2.6:8787` 成功读取健康接口，Windows 两入口 HTTP 200；生产 HTML 和 JPEG 封面接口均返回正确媒体类型。
+- 从 WSL 虚拟机通过 `192.0.2.20:8787` 成功读取健康接口，Windows 两入口 HTTP 200；生产 HTML 和 JPEG 封面接口均返回正确媒体类型。
 - HTTP 浏览器实际查看了真实封面、S058 搜索、详情素材与路径、设置深链接、本机与 LAN 不同能力提示。已检查 390px 手机设置布局，没有横向溢出；所检查页面运行日志未出现 warn/error。
 - 已保存桌面浅色与手机截图到本次 Codex 可视化目录。
 

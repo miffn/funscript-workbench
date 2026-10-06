@@ -9,11 +9,11 @@ FastAPI 服务由 `backend.main:app` 提供，SQLite 及封面保存在项目 `d
 | Environment | Default | Purpose |
 | --- | --- | --- |
 | `WORKBENCH_DATA_DIR` | `<project>/data` | 持久化数据库、封面和历史快照目录 |
-| `WORKBENCH_ROOTS_JSON` | D 盘 `2026` / `workspace` 对应 WSL 路径 | `[{"path":"/mnt/d/...","windows_path":"D:\\...","label":"workspace"}]` |
+| `WORKBENCH_ROOTS_JSON` | `[]`；目录由网页设置保存到数据库 | `[{"path":"/mnt/d/...","windows_path":"D:\\...","label":"workspace"}]` |
 | `WORKBENCH_FFMPEG` / `WORKBENCH_FFPROBE` | `ffmpeg` / `ffprobe` | 封面工具可执行文件 |
 | `WORKBENCH_HOST_KEY_FILE` | `<data>/host.key` | 本机网关共享密钥；永不返回给浏览器 |
-| `WORKBENCH_OPEN_MODE` | `native` | 生产设 `gateway`，由 Windows 网关启动 Explorer |
-| `WORKBENCH_PREVIEW_OUTPUT_ROOT` | `/mnt/d/Media/workspace/预览` | 专用成品根目录，扫描与未编号统计排除其整个子树 |
+| `WORKBENCH_OPEN_MODE` | `gateway` | 生产设 `gateway`，由 Windows 网关启动 Explorer |
+| `WORKBENCH_PREVIEW_OUTPUT_ROOT` | `<data>/previews` | 专用成品根目录，扫描与未编号统计排除其整个子树 |
 | `WORKBENCH_PREVIEW_RENDERER` | `<project>/preview_generator/build/ofs-preview-renderer` | 已构建的 EGL/OpenGL 渲染器 |
 
 历史快照放在 `data/import/master-pipeline.json` 和 `data/import/monthly-release-plan.json`，采用 `{"rows":[{"Script ID":"S029",...}]}`。首次导入后不再读取外部数据，导入状态按完整编号应用一次。未匹配资料产生提醒，不增加库存。

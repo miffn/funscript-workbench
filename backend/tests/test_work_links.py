@@ -132,7 +132,7 @@ def test_invalid_urls_are_rejected_without_mutation(inventory, value):
 
 
 @pytest.mark.parametrize('value', ['', 'https://www.patreon.com/posts/example-123', 'http://localhost:1234/file',
-                                   'http://192.0.2.5:3000/video', 'https://[::1]:443/path', 'https://例子.测试/path',
+                                   'http://192.0.2.10:3000/video', 'https://[::1]:443/path', 'https://例子.测试/path',
                                    'https://example.test/a%20b?token=abc#fragment'])
 def test_valid_url_domains_are_unrestricted(value):
     assert validate_link(value) == value

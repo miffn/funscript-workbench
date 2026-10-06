@@ -1,9 +1,40 @@
-﻿param(
-    [string]$LanHost = '192.0.2.6',
-    [string]$PythonPath = 'C:\Users\user\AppData\Local\Programs\Python\Python312\python.exe',
+param(
+    [string]$LanHost,
+    [string]$PythonPath,
     [string]$ProjectPath = (Split-Path $PSScriptRoot -Parent)
 )
 $ErrorActionPreference = 'Stop'
+function Resolve-WorkbenchLanHost {
+    param([string]$Value, [string]$ConfigPath = (Join-Path $env:ProgramData 'ScriptWorkbench\config.json'))
+    if (-not [string]::IsNullOrWhiteSpace($Value)) { return $Value }
+    if (Test-Path -LiteralPath $ConfigPath -PathType Leaf) {
+        try {
+            $configured = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
+            if ($configured.LanHost -is [string] -and -not [string]::IsNullOrWhiteSpace($configured.LanHost)) {
+                return $configured.LanHost
+            }
+        } catch { throw 'Unable to read existing workbench configuration; provide -LanHost explicitly.' }
+    }
+    throw 'Provide -LanHost explicitly. A first-time setup has no default LAN address.'
+}
+function Resolve-WorkbenchPython {
+    param([string]$Value)
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        $launcher = Get-Command py -ErrorAction SilentlyContinue
+        if (-not $launcher) { throw 'Python 3.12 launcher is unavailable; provide -PythonPath explicitly.' }
+        $discovered = @(& $launcher.Source -3.12 -c 'import sys; print(sys.executable)' 2>$null)
+        if ($LASTEXITCODE -ne 0 -or $discovered.Count -ne 1) {
+            throw 'Python 3.12 could not be discovered; provide -PythonPath explicitly.'
+        }
+        $Value = [string]$discovered[0]
+    }
+    if ([string]::IsNullOrWhiteSpace($Value) -or -not (Test-Path -LiteralPath $Value -PathType Leaf)) {
+        throw 'Windows Python executable is unavailable; provide a valid -PythonPath.'
+    }
+    return $Value
+}
+$LanHost = Resolve-WorkbenchLanHost -Value $LanHost
+$PythonPath = Resolve-WorkbenchPython -Value $PythonPath
 $projectPath = $ProjectPath
 $pathParts = $projectPath.TrimStart([char]92).Split([char]92)
 if ($pathParts.Count -lt 6 -or $pathParts[0] -notin @('wsl.localhost','wsl$') -or $pathParts[2] -ne 'home' -or $pathParts[4] -ne 'projects') {
@@ -11,7 +42,6 @@ if ($pathParts.Count -lt 6 -or $pathParts[0] -notin @('wsl.localhost','wsl$') -o
 }
 $executor = Join-Path $env:USERPROFILE '.codex\bin\Invoke-WslProject.ps1'
 if (-not (Test-Path -LiteralPath $executor)) { throw 'WSL project executor is missing.' }
-if (-not (Test-Path -LiteralPath $PythonPath)) { throw 'Windows Python executable does not exist.' }
 $taskName = 'ScriptWorkbench'
 $runtimeDir = Join-Path $env:ProgramData 'ScriptWorkbench'
 New-Item -ItemType Directory -Force -Path $runtimeDir | Out-Null

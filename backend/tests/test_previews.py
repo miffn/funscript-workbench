@@ -500,7 +500,7 @@ def test_preview_open_folder_requires_host_origin_and_authorized_output_mapping(
         assert response.status_code == 200
         assert base64.urlsafe_b64decode(response.headers["X-Workbench-Open-Folder"]).decode() == "D:\\Media\\workspace\\预览\\S070"
         assert client.post(endpoint, headers={**headers, "Origin": "http://evil.example"}).status_code == 403
-        assert client.post(endpoint, headers={**headers, "Host": "192.0.2.6:8787", "Origin": "http://192.0.2.6:8787"}).status_code == 403
+        assert client.post(endpoint, headers={**headers, "Host": "192.0.2.20:8787", "Origin": "http://192.0.2.20:8787"}).status_code == 403
         assert client.post(endpoint, headers={key: value for key, value in headers.items() if key != "Origin"}).status_code == 403
     unmapped = replace(config, preview_output_root=tmp_path / "unmapped")
     make_manifest(unmapped.preview_output_root / "S070")

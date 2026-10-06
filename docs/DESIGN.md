@@ -26,7 +26,7 @@
 
 WSL 中保存代码、SQLite 和封面缓存；视频与脚本留在 D 盘。项目目录为 `/home/user/projects/script-workbench`。Windows 路径与 WSL 读取路径通过统一映射处理，不能把浏览器端路径字符串直接交给执行器。
 
-本机采用 WSL NAT 网络，应用服务监听 `127.0.0.1:8789`。Windows 标准库网关提供本机 `http://localhost:8788/` 与局域网 `http://192.0.2.6:8787/` 两个入口，固定转发至该后端。本机入口验证 Host 与操作 Origin 后注入私有主机凭据；LAN 入口剥离凭据，后端也拒绝目录打开操作。后端校验数据库内已有目录，使用内部响应头将路径传给本机网关，网关剥离该头、复核 D 盘范围，再调用 Explorer，避免 WSL systemd 的 Windows interop 依赖。
+本机采用 WSL NAT 网络，应用服务监听 `127.0.0.1:8789`。Windows 标准库网关提供本机 `http://localhost:8788/` 与局域网 `http://192.0.2.20:8787/` 两个入口，固定转发至该后端。本机入口验证 Host 与操作 Origin 后注入私有主机凭据；LAN 入口剥离凭据，后端也拒绝目录打开操作。后端校验数据库内已有目录，使用内部响应头将路径传给本机网关，网关剥离该头、复核 D 盘范围，再调用 Explorer，避免 WSL systemd 的 Windows interop 依赖。
 
 ## 后端模块
 

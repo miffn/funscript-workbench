@@ -132,8 +132,8 @@ def test_invalid_parameters_are_rejected_before_tool_work(config, overrides):
 
 
 def test_inventory_output_permission_is_narrow(config):
-    with pytest.raises(GenerationError, match="Inventory output must"):
-        generate(replace(config, output_dir="/mnt/d/Media/workspace/S999"))
+    with pytest.raises(GenerationError, match="overlaps"):
+        generate(replace(config, output_dir=config.video.parent / 'generated'))
 
 
 def test_workbench_staging_stays_inside_current_id_output(config):
@@ -142,7 +142,7 @@ def test_workbench_staging_stays_inside_current_id_output(config):
     assert _validate_config(replace(config, output_dir=stage))[1] == stage.resolve()
     for forbidden in (stage / 'nested', OUTPUT_ROOT / 'S998' / stage.name,
                       OUTPUT_ROOT / config.work_id / 'other-output'):
-        with pytest.raises(GenerationError, match='Inventory output must'):
+        with pytest.raises(GenerationError, match='Preview output must'):
             _validate_config(replace(config, output_dir=forbidden))
 
 

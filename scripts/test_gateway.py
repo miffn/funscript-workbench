@@ -38,7 +38,7 @@ class EchoHandler(BaseHTTPRequestHandler):
 def gateways():
     upstream = ThreadingHTTPServer(("127.0.0.1", 0), EchoHandler)
     local = make_server("127.0.0.1", 0, {"localhost:8788"}, upstream.server_port, "trusted-secret")
-    remote = make_server("127.0.0.1", 0, {"192.0.2.6:8787"}, upstream.server_port)
+    remote = make_server("127.0.0.1", 0, {"192.0.2.10:8787"}, upstream.server_port)
     local.upstream_test_server = upstream
     servers = (upstream, local, remote)
     for server in servers:
@@ -66,7 +66,7 @@ def test_loopback_grants_key_and_lan_strips_spoofed_key(gateways):
     local, remote = gateways
     status, body = request(local, headers={"Host": "localhost:8788", "X-Workbench-Host-Key": "spoof"})
     assert status == 200 and json.loads(body)["key"] == "trusted-secret"
-    status, body = request(remote, headers={"Host": "192.0.2.6:8787", "X-Workbench-Host-Key": "spoof"})
+    status, body = request(remote, headers={"Host": "192.0.2.10:8787", "X-Workbench-Host-Key": "spoof"})
     assert status == 200 and json.loads(body)["key"] is None
 
 
@@ -91,13 +91,13 @@ def test_same_origin_write_preserves_body_and_host(gateways):
 
 def test_connection_header_cannot_smuggle_host_key(gateways):
     local, remote = gateways
-    headers = {"Host": "192.0.2.6:8787", "Connection": "X-Workbench-Host-Key", "X-Workbench-Host-Key": "spoof"}
+    headers = {"Host": "192.0.2.10:8787", "Connection": "X-Workbench-Host-Key", "X-Workbench-Host-Key": "spoof"}
     assert json.loads(request(remote, headers=headers)[1])["key"] is None
 
 
 def test_mcp_bearer_header_reaches_backend_without_granting_lan_host_capability(gateways):
     local, remote = gateways
-    for server, host in [(local, 'localhost:8788'), (remote, '192.0.2.6:8787')]:
+    for server, host in [(local, 'localhost:8788'), (remote, '192.0.2.10:8787')]:
         status, body = request(server, 'POST', {'Host': host, 'Authorization': 'Bearer test-token',
                                               'X-Workbench-Host-Key': 'forged'}, '{}', '/mcp')
         assert status == 200
@@ -107,7 +107,7 @@ def test_mcp_bearer_header_reaches_backend_without_granting_lan_host_capability(
 
 
 def test_gateway_rejects_duplicate_mcp_credentials_before_header_forwarding(gateways):
-    for server, host in [(gateways[0], 'localhost:8788'), (gateways[1], '192.0.2.6:8787')]:
+    for server, host in [(gateways[0], 'localhost:8788'), (gateways[1], '192.0.2.10:8787')]:
         conn = http.client.HTTPConnection('127.0.0.1', server.server_port)
         conn.putrequest('POST', '/mcp', skip_host=True)
         conn.putheader('Host', host)
@@ -128,7 +128,7 @@ def test_only_local_open_route_launches_folder(gateways, monkeypatch):
     request(local, "POST", {"Host": "localhost:8788", "Origin": "http://localhost:8788"}, "{}", "/api/works/1/open-folder")
     assert len(launched) == 1
     assert launched[0] == (encode(r"E:\custom-library\S029"), encode(r"E:\custom-library"))
-    request(remote, "POST", {"Host": "192.0.2.6:8787", "Origin": "http://192.0.2.6:8787"}, "{}", "/api/works/1/open-folder")
+    request(remote, "POST", {"Host": "192.0.2.10:8787", "Origin": "http://192.0.2.10:8787"}, "{}", "/api/works/1/open-folder")
     request(local, "GET", {"Host": "localhost:8788"}, path="/api/works/1/open-folder")
     assert len(launched) == 1
 
@@ -141,7 +141,7 @@ def test_preview_folder_route_preserves_host_only_opening(gateways, monkeypatch)
     path = "/api/works/54/preview/open-folder"
     assert request(local, "POST", local_headers, "{}", path)[0] == 200
     assert len(launched) == 1
-    remote_headers = {"Host": "192.0.2.6:8787", "Origin": "http://192.0.2.6:8787",
+    remote_headers = {"Host": "192.0.2.10:8787", "Origin": "http://192.0.2.10:8787",
                       "X-Workbench-Host-Key": "spoof"}
     request(remote, "POST", remote_headers, "{}", path)
     request(local, "GET", {"Host": "localhost:8788"}, path=path)
@@ -213,7 +213,7 @@ def test_launcher_requires_encoded_authorized_root(root):
 
 def test_gateway_strips_folder_authorization_in_both_directions(gateways):
     local, remote = gateways
-    for server, host in ((local, "localhost:8788"), (remote, "192.0.2.6:8787")):
+    for server, host in ((local, "localhost:8788"), (remote, "192.0.2.10:8787")):
         headers = {"Host": host, "X-Workbench-Folder-Root": encode("C:\\"),
                    "X-Workbench-Open-Folder": encode(r"C:\Windows")}
         echoed = json.loads(request(server, headers=headers)[1])
@@ -272,7 +272,7 @@ def test_folder_activation_timeout_returns_gateway_failure(gateways, monkeypatch
 
 def test_mcp_native_read_rpc_without_origin_is_allowed_only_on_exact_endpoint(gateways):
     local, remote = gateways
-    for server, host in ((local, 'localhost:8788'), (remote, '192.0.2.6:8787')):
+    for server, host in ((local, 'localhost:8788'), (remote, '192.0.2.10:8787')):
         headers = {'Host': host, 'Content-Type': 'application/json'}
         assert request(server, 'POST', headers, '{}', '/mcp')[0] == 200
         for path in ('/api/scans', '/mcp/other', '/mcp/', '/mcp?write=1'):

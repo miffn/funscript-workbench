@@ -1,6 +1,6 @@
 # 项目约定
 
-- 项目实际执行位置是 `/home/user/projects/script-workbench`；Windows Desktop 使用全局 WSL 执行器运行项目命令。
+- 项目执行位置以当前选定工作区的 WSL 实际路径为准；Windows Desktop 使用全局 WSL 执行器运行项目命令。
 - `scripts/Start-Workbench.ps1`、`Stop-Workbench.ps1`、`Install-Autostart.ps1`、`Run-Workbench.ps1` 与 `windows_gateway.py` 是 Windows 主机适配层，必须使用 Windows 工具运行。其他构建、Python 后端、测试、Git 均在 WSL 执行。
 - `Run-Workbench.ps1` 的长期 WSL 保活连接属于 Windows 的 WSL 生命周期管理，可用 `wsl.exe` 连接当前项目 UNC 指定的发行版和 Linux 用户；不借此运行仓库命令，后端控制仍使用全局执行器。
 - 原始素材只读，不删除、移动、重命名或写入用户的视频、脚本及其他素材。用户已明确授权配置的专用预览输出目录保存 WebM、GIF 和热力图；编号作品保留完整编号目录，未编号作品使用稳定的 `work-<内部ID>` 目录。仅此输出目录可新建并写入生成结果，不扩大素材写权限。此目录整体排除出库存发现与素材扫描。

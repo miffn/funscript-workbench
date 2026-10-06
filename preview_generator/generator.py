@@ -25,7 +25,7 @@ from .scripts import AXES, ScriptError, discover_scripts, frame_values, load_scr
 
 VERSION = "1.0.0"
 PROJECT = Path(__file__).resolve().parent.parent
-OUTPUT_ROOT = Path("/mnt/d/Media/workspace/预览")
+OUTPUT_ROOT = PROJECT / "data/previews"
 OFS_SOURCE = {"repository": "https://github.com/miffn/OFS-custom",
               "commit": "d341a387649a3a9cdd5757ad9f0b1a3ca83af7d8"}
 
@@ -128,15 +128,13 @@ def _validate_config(config: Config) -> tuple[Path, Path, Path, dict[str, Path]]
         raise GenerationError(f"Renderer executable missing: {renderer}; build it first")
     if str(config.model) != "builtin" and not Path(config.model).is_file():
         raise GenerationError(f"Model does not exist: {config.model}")
-    # Prevent an output typo from modifying source materials. The user authorized
-    # only workspace/预览/<ID> as a generated-file exception inside D: inventory.
-    inventory_root = Path("/mnt/d/Media").resolve()
+    # Keep the shared default root scoped to the current work and its staging
+    # directory. Explicit external output paths are checked against real inputs
+    # below; no user's inventory location belongs in this portable module.
     authorized_output = (OUTPUT_ROOT / config.work_id).resolve()
     staging_output = output.parent == authorized_output and re.fullmatch(r"\.workbench-stage-[a-z0-9_]{8}", output.name)
-    if output.is_relative_to(inventory_root) and output != authorized_output and not staging_output:
-        raise GenerationError(f"Inventory output must be {OUTPUT_ROOT / config.work_id}")
-    if output == video.parent or output.is_relative_to(video.parent) and not output.is_relative_to(OUTPUT_ROOT):
-        raise GenerationError("Output directory overlaps the source material directory")
+    if output.is_relative_to(OUTPUT_ROOT.resolve()) and output != authorized_output and not staging_output:
+        raise GenerationError(f"Preview output must be {OUTPUT_ROOT / config.work_id}")
     for name in ("width", "height", "fps", "gif_width", "gif_height", "gif_fps",
                  "simulator_width", "simulator_height", "threads"):
         value = getattr(config, name)
@@ -181,6 +179,10 @@ def _validate_config(config: Config) -> tuple[Path, Path, Path, dict[str, Path]]
         raise GenerationError("The same file cannot be assigned to multiple axes")
     if any(not path.is_file() for path in scripts.values()):
         raise GenerationError("A selected script does not exist")
+    source_directories = {path.parent for path in (video, *scripts.values())}
+    for directory, label in ((output, 'Output directory'), (Path(config.cache_dir).expanduser().resolve(), 'Intermediate cache')):
+        if any(directory.is_relative_to(source) or source.is_relative_to(directory) for source in source_directories):
+            raise GenerationError(f"{label} overlaps the source material directory")
     return video, output, renderer, scripts
 
 
@@ -383,9 +385,7 @@ def generate(config: Config, on_progress: Callable[[dict], None] | None = None,
                     "hud": hud, "tools": tools, "options": options,
                     "clips": clips, "warnings": warnings, "outputs": [], "output_dir": str(output)}
         _atomic_json(manifest_path, manifest)
-        cache = Path(config.cache_dir).resolve()
-        if cache.is_relative_to(Path("/mnt/d/Media").resolve()):
-            raise GenerationError("Intermediate cache must not be in the inventory tree")
+        cache = Path(config.cache_dir).expanduser().resolve()
         cache.mkdir(parents=True, exist_ok=True)
         scratch = Path(tempfile.mkdtemp(prefix=f"{config.work_id}-", dir=cache))
         old_outputs = {item.get("filename"): item for item in previous.get("outputs", [])
