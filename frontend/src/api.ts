@@ -7,7 +7,7 @@ export interface Issue { type: string; message: string; script_id?: string | nul
 export interface Directory { id: number; windows_path: string; path: string; available: boolean }
 export interface Asset { id: number; name: string; relative_path: string; kind: string; axis?: string | null; size: number; directory_id: number }
 export type TagCategory = 'author' | 'video_type' | 'axis_type' | 'release_type' | 'tier' | 'duration' | 'custom';
-export interface Tag { id: number; category: TagCategory; name: string; support_url: string | null; support_status: 'unknown' | 'none' | 'url'; revision: number; usage_count: number; support_candidates?: string[] }
+export interface Tag { id: number; category: TagCategory; name: string; support_url: string | null; support_status: 'unknown' | 'none' | 'url'; revision: number; usage_count: number; support_candidates?: string[]; color_light?: string | null; color_dark?: string | null }
 export interface WorkTags { work_id: number; tags: Tag[]; tags_revision: number }
 export type WorkLinkKind = 'patreon' | 'video' | 'script' | 'es';
 export type WorkLinkValues = Record<WorkLinkKind, string>;

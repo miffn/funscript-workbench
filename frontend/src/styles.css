@@ -171,3 +171,58 @@
 .job-work-name{font-size:13px;font-weight:500;overflow-wrap:anywhere}.detail-actions>div>.button.primary{margin-left:auto}
 
 .scan-candidate-feedback.warning{background:var(--warm-bg);color:var(--warm)}
+
+/* Inventory cards: quiet metadata and open shortcut targets, per the work-card spec. */
+.inventory-work-card.work-card { border-radius:12px; box-shadow:none; }
+.inventory-work-card.work-card:hover { box-shadow:none; }
+.work-collection.gallery .inventory-work-card.work-card > .cover { aspect-ratio:16/9; }
+.inventory-work-card.work-card .publication-badges { gap:8px 15px; margin-bottom:7px; }
+.inventory-work-card.work-card .publication-badges > .badge {
+  display:inline-flex; align-items:center; gap:5px; min-height:0; padding:0;
+  border:0; border-radius:0; box-shadow:none; background:transparent;
+  color:var(--muted); font-size:12px; line-height:1.6; font-weight:400;
+}
+.inventory-work-card.work-card .publication-badges > .badge::before {
+  content:''; width:5px; height:5px; border-radius:50%; flex-shrink:0;
+  background:var(--warm);
+}
+.inventory-work-card.work-card .publication-badges > .badge.published::before { background:var(--good); }
+.inventory-work-card.work-card .work-foot { align-items:center; gap:8px; min-height:36px; margin-top:5px; }
+.inventory-work-card.work-card .asset-count { color:var(--muted); gap:5px; font-size:12px; }
+.inventory-work-card.work-card .card-edit-tags {
+  display:inline-flex; align-items:center; gap:5px; margin-left:auto; min-height:36px;
+  border:0; border-radius:5px; padding:5px 6px; background:transparent;
+  color:var(--muted); font-size:12px; white-space:nowrap; box-shadow:none;
+  visibility:visible; opacity:1;
+}
+.inventory-work-card.work-card .work-info > .work-link-buttons {
+  display:flex; align-items:center; flex-wrap:wrap; column-gap:20px; row-gap:0; margin-top:2px;
+}
+.inventory-work-card.work-card .work-link-buttons > .work-link-button {
+  display:inline-flex; flex-direction:row; align-items:center; gap:5px;
+  min-height:36px; min-width:44px; padding:5px 4px; border:0; border-radius:5px;
+  background:transparent; color:var(--muted); box-shadow:none; font-size:12px;
+}
+.inventory-work-card.work-card .work-link-buttons > .work-link-button > span { font-size:12px; line-height:1.4; }
+.inventory-work-card.work-card .work-link-buttons > .work-link-button > svg { width:15px; height:15px; stroke-width:1.5; }
+.inventory-work-card.work-card .work-link-buttons > .work-link-button > .link-filled-mark {
+  position:static; width:11px; height:11px; margin:0; stroke-width:1.6; color:inherit;
+}
+.inventory-work-card.work-card .card-edit-tags:hover,
+.inventory-work-card.work-card .card-edit-tags:focus-visible,
+.inventory-work-card.work-card .work-link-buttons > .work-link-button:hover,
+.inventory-work-card.work-card .work-link-buttons > .work-link-button:focus-visible {
+  color:var(--text); background:color-mix(in srgb,var(--text) 5%,transparent);
+  box-shadow:none;
+}
+.inventory-work-card.work-card .card-edit-tags:focus-visible,
+.inventory-work-card.work-card .work-link-buttons > .work-link-button:focus-visible {
+  outline:2px solid var(--focus); outline-offset:2px;
+}
+@media(max-width:1120px) {
+  .inventory-work-card.work-card .work-info > .work-link-buttons { column-gap:12px; }
+}
+@media(max-width:700px) {
+  .inventory-work-card.work-card .work-info > .work-link-buttons { column-gap:10px; }
+  .inventory-work-card.work-card .work-foot { gap:5px; }
+}

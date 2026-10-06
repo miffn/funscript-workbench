@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from urllib.parse import urlsplit
 
 from .store import Store
@@ -12,6 +13,7 @@ RELEASE_NAMES = {"free sample": "Free Sample", "paid": "Paid"}
 TIER_NAMES = {"free": "Free", "main tier": "Main Tier", "extra tier": "Extra Tier"}
 VIDEO_NAMES = {"real": "Real", "anime": "Anime", "3dcg": "3DCG", "vam": "VAM"}
 AXIS_NAMES = {"single-axis": "单轴", "single axis": "单轴", "multi-axis": "多轴", "multi axis": "多轴"}
+COLOR_FIELDS = ('color_light', 'color_dark')
 
 
 def sync_axis_tag(db, work_id: int, initialize=False):
@@ -54,6 +56,14 @@ class TagError(ValueError):
     def __init__(self, message: str, status_code=422):
         super().__init__(message)
         self.status_code = status_code
+
+
+def validate_color(value: str | None) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not re.fullmatch(r'#[0-9a-fA-F]{6}', value):
+        raise TagError('标签文字颜色必须为 #RRGGBB 或 null')
+    return value.upper()
 
 
 def validate_name(category: str, name: str) -> str:
@@ -147,7 +157,7 @@ class TagService:
         row = db.execute("SELECT t.*,count(wt.work_id) AS usage_count FROM tags t LEFT JOIN work_tags wt ON wt.tag_id=t.id WHERE t.id=? GROUP BY t.id", (tag_id,)).fetchone()
         if row is None:
             raise TagError("标签不存在", 404)
-        result = {key: row[key] for key in ("id", "category", "name", "support_url", "support_status", "revision", "usage_count")}
+        result = {key: row[key] for key in ("id", "category", "name", "support_url", "support_status", "revision", "usage_count", *COLOR_FIELDS)}
         result["support_candidates"] = json.loads(row["support_candidates"])
         return result
 
@@ -171,13 +181,14 @@ class TagService:
             raise TagError('时间标签由源视频自动计算，不能手动创建')
         name = validate_name(category, changes["name"])
         status, url = support_fields(category, changes)
+        colors = [validate_color(changes.get(field)) for field in COLOR_FIELDS]
         with self.store.connection() as db:
             db.execute("BEGIN IMMEDIATE")
             if db.execute("SELECT id FROM tags WHERE category=? AND name_key=?", (category, name.casefold())).fetchone():
                 raise TagError("该类别中已存在同名标签，请使用已有标签", 409)
             manual = category == "author" and any(key in changes for key in ("support_url", "support_status"))
-            tag_id = db.execute("INSERT INTO tags(category,name,name_key,support_url,support_status,support_manual) VALUES(?,?,?,?,?,?)",
-                                (category, name, name.casefold(), url, status, int(manual))).lastrowid
+            tag_id = db.execute("INSERT INTO tags(category,name,name_key,support_url,support_status,support_manual,color_light,color_dark) VALUES(?,?,?,?,?,?,?,?)",
+                                (category, name, name.casefold(), url, status, int(manual), *colors)).lastrowid
             return self.tag(db, tag_id)
 
     def update(self, tag_id: int, changes: dict) -> dict:
@@ -195,8 +206,10 @@ class TagService:
             if db.execute("SELECT id FROM tags WHERE category=? AND name_key=? AND id!=?", (current["category"], name.casefold(), tag_id)).fetchone():
                 raise TagError("该类别中已存在同名标签", 409)
             status, url = support_fields(current["category"], changes, current)
+            colors = [validate_color(changes.get(field, current[field])) for field in COLOR_FIELDS]
+            colors_changed = any(value != current[field] for field, value in zip(COLOR_FIELDS, colors))
             # Renaming an enum label may change validity of every linked work.
-            if current["category"] in {"release_type", "tier"}:
+            if current["category"] in {"release_type", "tier"} and name != current["name"]:
                 for work in db.execute("SELECT work_id FROM work_tags WHERE tag_id=?", (tag_id,)).fetchall():
                     selection = [dict(value) for value in db.execute("SELECT t.* FROM tags t JOIN work_tags wt ON wt.tag_id=t.id WHERE wt.work_id=?", (work[0],))]
                     for selected in selection:
@@ -204,13 +217,16 @@ class TagService:
                             selected["name"] = name
                     validate_selection(selection)
             manual = current["support_manual"] or (current["category"] == "author" and any(key in changes for key in ("support_url", "support_status")))
-            changed = name != current["name"] or status != current["support_status"] or url != current["support_url"] or manual != current["support_manual"]
+            changed = name != current["name"] or status != current["support_status"] or url != current["support_url"] or manual != current["support_manual"] or colors_changed
             if changed:
-                db.execute("UPDATE tags SET name=?,name_key=?,support_status=?,support_url=?,support_manual=?,revision=revision+1 WHERE id=?", (name, name.casefold(), status, url, int(manual), tag_id))
+                db.execute("UPDATE tags SET name=?,name_key=?,support_status=?,support_url=?,support_manual=?,color_light=?,color_dark=?,revision=revision+1 WHERE id=?", (name, name.casefold(), status, url, int(manual), *colors, tag_id))
                 if name != current["name"]:
                     # Shared renaming is a manual classification decision for linked works.
                     # Protect their association and invalidate stale binding editors atomically.
                     db.execute("INSERT INTO work_tag_state(work_id,revision,manual_edited) SELECT work_id,1,1 FROM work_tags WHERE tag_id=? ON CONFLICT(work_id) DO UPDATE SET revision=work_tag_state.revision+1,manual_edited=1", (tag_id,))
+                elif colors_changed:
+                    # Cosmetic edits invalidate readers without freezing scanned classifications.
+                    db.execute("INSERT INTO work_tag_state(work_id,revision) SELECT work_id,1 FROM work_tags WHERE tag_id=? ON CONFLICT(work_id) DO UPDATE SET revision=work_tag_state.revision+1", (tag_id,))
             return self.tag(db, tag_id)
 
     def replace_work(self, work_id: int, tag_ids: list[int], expected_revision: int) -> dict:

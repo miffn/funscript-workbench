@@ -71,6 +71,8 @@ CREATE TABLE IF NOT EXISTS tags (
  support_manual INTEGER NOT NULL DEFAULT 0,
  revision INTEGER NOT NULL DEFAULT 1,
  provenance TEXT NOT NULL DEFAULT '[]',
+ color_light TEXT CHECK(color_light IS NULL OR (length(color_light)=7 AND substr(color_light,1,1)='#' AND substr(color_light,2) NOT GLOB '*[^0-9A-Fa-f]*')),
+ color_dark TEXT CHECK(color_dark IS NULL OR (length(color_dark)=7 AND substr(color_dark,1,1)='#' AND substr(color_dark,2) NOT GLOB '*[^0-9A-Fa-f]*')),
  UNIQUE(category,name_key),
  CHECK((support_status='url' AND support_url IS NOT NULL) OR (support_status IN ('unknown','none') AND support_url IS NULL))
 );
@@ -146,6 +148,17 @@ INVENTORY_TABLES = (
     'work_tag_state', 'work_links', 'work_durations', 'release_calendar_plans',
 )
 INVENTORY_SETTING_KEYS = ('root_catalog', 'last_scan')
+
+
+def add_tag_color_schema(db):
+    columns = {row['name'] for row in db.execute('PRAGMA table_info(tags)')}
+    for field in ('color_light', 'color_dark'):
+        if field not in columns:
+            db.execute(f"ALTER TABLE tags ADD COLUMN {field} TEXT CHECK({field} IS NULL OR "
+                       f"(length({field})=7 AND substr({field},1,1)='#' AND "
+                       f"substr({field},2) NOT GLOB '*[^0-9A-Fa-f]*'))")
+            # An old trigger's UPDATE predicate has no knowledge of this column.
+            db.execute('DROP TRIGGER IF EXISTS inventory_tags_update')
 
 
 def add_cover_schema(db):
@@ -309,6 +322,7 @@ class Store:
                     require_production_confirmation(db, work['id'])
                 db.execute("INSERT INTO settings(key,value) VALUES('production_confirmation_initialized','true')")
             add_cover_schema(db)
+            add_tag_color_schema(db)
             add_inventory_revision_schema(db)
 
     @contextmanager

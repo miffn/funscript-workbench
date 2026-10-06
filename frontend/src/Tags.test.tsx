@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { TagChips, TagsPage, WorkTagEditor } from './Tags';
+import { TagChips, TagsPage, WorkTagEditor, tagColorStyle } from './Tags';
 import type { Tag, Work, WorkTags } from './api';
 
 const makeTag = (id: number, category: Tag['category'], name: string): Tag => ({ id, category, name, revision: 1, usage_count: 0, support_status: 'unknown', support_url: null });
@@ -284,5 +284,72 @@ describe('shared author tag management', () => {
     await waitFor(() => expect(changed).toHaveBeenCalledOnce());
     const [, init] = fetchMock.mock.calls.find(([, init]) => init?.method === 'POST')!;
     expect(JSON.parse(init.body)).toEqual({ category: 'author', name: '新作者', support_status: 'none', support_url: null });
+  });
+});
+
+describe('custom tag colors', () => {
+  it('shares saved theme colors across tag chips and falls back by category', () => {
+    const tag = { ...tags[0], color_light: '#124B35', color_dark: '#ACDEC5' };
+    const { container } = render(<TagChips tags={[tag]} />);
+    expect((container.querySelector('.tag-chip') as HTMLElement).style.getPropertyValue('--tag-fg')).toBe('light-dark(#124B35, #ACDEC5)');
+    expect(tagColorStyle({ ...tag, color_dark: null })).toEqual({ '--tag-fg': 'light-dark(#124B35, var(--tag-author-fg))' });
+    expect(tagColorStyle(tags[0])).toBeUndefined();
+  });
+
+  it('saves theme colors with revision protection and protects a color-only draft', async () => {
+    const changed = vi.fn(); render(<TagsPage revision={0} onChanged={changed} />);
+    fireEvent.click(await screen.findByRole('button', { name: '编辑标签 作者 A' }));
+    fireEvent.change(screen.getByLabelText('浅色标签颜色'), { target: { value: '#124b35' } });
+    fireEvent.change(screen.getByLabelText('选择深色颜色'), { target: { value: '#acdec5' } });
+    expect((within(screen.getByRole('navigation', { name: '标签类别' })).getByRole('button', { name: '视频类型 2' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((document.querySelector('.tag-color-preview.light>span') as HTMLElement).style.color).toBe('rgb(18, 75, 53)');
+    fireEvent.click(screen.getByRole('button', { name: '保存资料' }));
+    await waitFor(() => expect(changed).toHaveBeenCalledOnce());
+    const [, init] = fetchMock.mock.calls.find(([, init]) => init?.method === 'PATCH')!;
+    expect(JSON.parse(init.body)).toEqual({ expected_revision: 1, name: '作者 A', color_light: '#124B35', color_dark: '#ACDEC5' });
+    expect((screen.getByRole('button', { name: '保存资料' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('restores both defaults with explicit nulls and keeps the tag identity', async () => {
+    catalog[0] = { ...catalog[0], color_light: '#124B35', color_dark: '#ACDEC5' };
+    render(<TagsPage revision={0} onChanged={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: '编辑标签 作者 A' }));
+    fireEvent.click(screen.getByRole('button', { name: '恢复默认颜色' }));
+    fireEvent.click(screen.getByRole('button', { name: '保存资料' }));
+    await screen.findByText('标签资料已保存');
+    const [url, init] = fetchMock.mock.calls.find(([, init]) => init?.method === 'PATCH')!;
+    expect(url).toBe('/api/tags/1');
+    expect(JSON.parse(init.body)).toMatchObject({ name: '作者 A', color_light: null, color_dark: null });
+  });
+
+  it('rejects invalid hex and retains the chosen colors after failed saves and conflicts', async () => {
+    render(<TagsPage revision={0} onChanged={vi.fn()} />);
+    fireEvent.click(await screen.findByRole('button', { name: '编辑标签 作者 A' }));
+    fireEvent.change(screen.getByLabelText('浅色标签颜色'), { target: { value: '#bad' } });
+    expect((screen.getByRole('button', { name: '保存资料' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByRole('alert').textContent).toContain('#RRGGBB');
+    fireEvent.change(screen.getByLabelText('浅色标签颜色'), { target: { value: '#124B35' } });
+    failStatus = 503; fireEvent.click(screen.getByRole('button', { name: '保存资料' }));
+    await screen.findByText(/标签未保存/);
+    expect((screen.getByLabelText('浅色标签颜色') as HTMLInputElement).value).toBe('#124B35');
+    failStatus = 409; fireEvent.click(screen.getByRole('button', { name: '保存资料' }));
+    await screen.findByText(/该标签已被其他客户端修改/);
+    expect((screen.getByLabelText('浅色标签颜色') as HTMLInputElement).value).toBe('#124B35');
+    catalog[0] = { ...catalog[0], revision: 8, color_light: '#335544' };
+    failStatus = 0; fireEvent.click(screen.getByRole('button', { name: '刷新并重新编辑' }));
+    await waitFor(() => expect((screen.getByLabelText('浅色标签颜色') as HTMLInputElement).value).toBe('#335544'));
+  });
+
+  it('includes custom colors when creating a tag', async () => {
+    const changed = vi.fn(); render(<TagsPage revision={0} onChanged={changed} />);
+    await screen.findByRole('button', { name: '编辑标签 作者 A' });
+    fireEvent.click(screen.getByRole('button', { name: '创建标签' }));
+    fireEvent.change(screen.getByLabelText('名称'), { target: { value: '新作者' } });
+    fireEvent.change(screen.getByLabelText('浅色标签颜色'), { target: { value: '#124B35' } });
+    fireEvent.click(screen.getAllByRole('button', { name: '创建标签' })[1]);
+    await waitFor(() => expect(changed).toHaveBeenCalledOnce());
+    const [, init] = fetchMock.mock.calls.find(([, init]) => init?.method === 'POST')!;
+    expect(JSON.parse(init.body)).toMatchObject({ category: 'author', name: '新作者', color_light: '#124B35' });
+    expect(JSON.parse(init.body)).not.toHaveProperty('color_dark');
   });
 });

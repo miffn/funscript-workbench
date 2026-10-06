@@ -19,7 +19,7 @@ from .scanner import enrich_metadata
 from .previews import MEDIA_FILES, PreviewError
 from .store import Store, now, inventory_revision
 from .inventory_cache import InventoryCache, InventoryCacheError
-from .tags import TagService, TagError
+from .tags import TagService, TagError, validate_color
 from .durations import duration_fields
 from .scan_roots import ScanRoots, ScanRootsError
 from .work_links import WorkLinks, WorkLinksError, PUBLICATION_FIELDS
@@ -38,6 +38,7 @@ from .mcp_auth import MCPAuth, register_mcp_auth_routes
 
 
 ReleaseDate = Annotated[str | None, BeforeValidator(validate_release_date)]
+TagColor = Annotated[str | None, BeforeValidator(validate_color)]
 
 
 class WorkEdit(BaseModel):
@@ -130,6 +131,8 @@ class TagCreate(BaseModel):
     name: str = Field(strict=True, min_length=1, max_length=120)
     support_url: str | None = Field(default=None, strict=True, max_length=2000)
     support_status: Literal["unknown", "none", "url"] | None = None
+    color_light: TagColor = None
+    color_dark: TagColor = None
 
 
 class TagEdit(BaseModel):
@@ -138,6 +141,8 @@ class TagEdit(BaseModel):
     name: str | None = Field(default=None, strict=True, min_length=1, max_length=120)
     support_url: str | None = Field(default=None, strict=True, max_length=2000)
     support_status: Literal["unknown", "none", "url"] | None = None
+    color_light: TagColor = None
+    color_dark: TagColor = None
 
 
 class WorkTagsEdit(BaseModel):
